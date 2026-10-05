@@ -2403,9 +2403,13 @@ class ClaudeAgentSession implements AgentSession {
       }
       this.activeForegroundQuery = this.query;
       this.activeForegroundInput = this.input;
-      this.input.push(sdkMessage);
-      this.emitSubmittedUserMessage(sdkMessage, turnId, options?.clientMessageId);
       this.startQueryPump();
+      this.input.push(sdkMessage);
+      setTimeout(() => {
+        if (this.activeForegroundTurnId === turnId) {
+          this.emitSubmittedUserMessage(sdkMessage, turnId, options?.clientMessageId);
+        }
+      }, 0);
     } catch (error) {
       if (sdkUserMessageId) this.unstartedMessageUuids.delete(sdkUserMessageId);
       this.finishForegroundTurn(
