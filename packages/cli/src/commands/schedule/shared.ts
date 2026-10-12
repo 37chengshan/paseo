@@ -1,3 +1,4 @@
+import { parseSafeInteger } from "../../utils/integer.js";
 import type { DaemonTarget } from "../../utils/daemon-target.js";
 import { connectToDaemon, getDaemonHost } from "../../utils/client.js";
 import type { CommandError, CommandOptions } from "../../output/index.js";
@@ -441,9 +442,8 @@ function buildNewAgentConfigPatch(
 }
 
 function parsePositiveInt(value: string, flag: string): number {
-  const parsed = Number(value);
-  const isPositiveInteger = Number.isSafeInteger(parsed) && parsed > 0;
-  if (!isPositiveInteger) {
+  const parsed = parseSafeInteger(value);
+  if (parsed === undefined || parsed <= 0) {
     throw {
       code: "INVALID_INTEGER",
       message: `${flag} must be a positive integer`,

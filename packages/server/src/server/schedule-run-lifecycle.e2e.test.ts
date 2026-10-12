@@ -43,36 +43,42 @@ function makeTempDir(prefix: string): string {
   return dir;
 }
 
-test.each(["2.5", "2runs", "9007199254740993", "0", "-1", ""])(
-  "CLI schedule create rejects max-runs %j without saving a schedule",
-  async (maxRuns) => {
-    const cwd = makeTempDir("schedule-cli-integer-");
-    const result = await runPaseoCli({
-      daemon: ctx.daemon,
-      args: [
-        "schedule",
-        "create",
-        "Integer limit",
-        "--cron",
-        "0 0 1 1 *",
-        "--provider",
-        "claude",
-        "--cwd",
-        cwd,
-        "--max-runs",
-        maxRuns,
-        "--json",
-      ],
-    });
-    expect(result.exitCode, result.stdout + result.stderr).toBe(1);
-    expect(JSON.parse(result.stderr)).toEqual({
-      error: { code: "INVALID_INTEGER", message: "--max-runs must be a positive integer" },
-    });
-    expect((await ctx.client.scheduleList()).schedules).toEqual([]);
-  },
-);
+test.each([
+  "4503599627370496.5",
+  "1.0000000000000001",
+  "2.5",
+  "2runs",
+  "9007199254740993",
+  "0",
+  "-1",
+  "",
+])("CLI schedule create rejects max-runs %j without saving a schedule", async (maxRuns) => {
+  const cwd = makeTempDir("schedule-cli-integer-");
+  const result = await runPaseoCli({
+    daemon: ctx.daemon,
+    args: [
+      "schedule",
+      "create",
+      "Integer limit",
+      "--cron",
+      "0 0 1 1 *",
+      "--provider",
+      "claude",
+      "--cwd",
+      cwd,
+      "--max-runs",
+      maxRuns,
+      "--json",
+    ],
+  });
+  expect(result.exitCode, result.stdout + result.stderr).toBe(1);
+  expect(JSON.parse(result.stderr)).toEqual({
+    error: { code: "INVALID_INTEGER", message: "--max-runs must be a positive integer" },
+  });
+  expect((await ctx.client.scheduleList()).schedules).toEqual([]);
+});
 
-test.each(["2.5", "2runs"])(
+test.each(["2.5", "2runs", "4503599627370496.5"])(
   "CLI schedule update rejects max-runs %j without changing the schedule",
   async (maxRuns) => {
     const cwd = makeTempDir("schedule-cli-update-integer-");

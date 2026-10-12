@@ -40,6 +40,10 @@ async function createQuietTerminal() {
 }
 
 test.each([
+  ["--end", "4503599627370496.5"],
+  ["--start", "1.0000000000000001"],
+  ["--end", "4.5035996273704965e15"],
+  ["--end", "1e-324"],
   ["--start", "1.5"],
   ["--end", "1.5"],
   ["--start", "1abc"],
@@ -71,6 +75,9 @@ test.each([
 test.each([
   { args: [], lineCount: 10 },
   { args: ["--start", "0", "--end", "1"], lineCount: 2 },
+  { args: ["--end", "1.0"], lineCount: 2 },
+  { args: ["--end", "10e-1"], lineCount: 2 },
+  { args: ["--end", ".1e1"], lineCount: 2 },
   { args: ["--start", "-2", "--end", "-1"], lineCount: 2 },
   { args: ["--scrollback", "--start", "7", "--end", "1"], lineCount: 2 },
 ])("CLI terminal capture preserves valid ranges $args", async ({ args, lineCount }) => {

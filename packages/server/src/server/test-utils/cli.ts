@@ -30,6 +30,8 @@ export function runPaseoCli({ daemon, args }: CliOptions): Promise<CliResult> {
       {
         env: { ...process.env, PASEO_HOME: daemon.paseoHome },
         stdio: ["ignore", "pipe", "pipe"],
+        timeout: 20_000,
+        killSignal: "SIGKILL",
       },
     );
     let stdout = "";
@@ -41,6 +43,12 @@ export function runPaseoCli({ daemon, args }: CliOptions): Promise<CliResult> {
       stderr += chunk.toString();
     });
     child.once("error", reject);
-    child.once("close", (exitCode) => resolve({ exitCode, stdout, stderr }));
+    child.once("close", (exitCode, signal) => {
+      if (signal) {
+        reject(new Error(`CLI exited on ${signal}:\n${stdout}\n${stderr}`));
+      } else {
+        resolve({ exitCode, stdout, stderr });
+      }
+    });
   });
 }
