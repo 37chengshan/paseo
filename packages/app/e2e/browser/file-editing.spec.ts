@@ -71,6 +71,14 @@ async function selectFileView(page: Page, view: "Preview" | "Source"): Promise<v
   await expect(option).toHaveAttribute("aria-selected", "true");
 }
 
+async function expectMarkdownImageLoaded(page: Page, name: string): Promise<void> {
+  const image = page.getByRole("img", { name, exact: true });
+  await expect(image).toBeVisible();
+  await expect
+    .poll(() => image.locator("img").evaluate((element: HTMLImageElement) => element.naturalWidth))
+    .toBeGreaterThan(0);
+}
+
 function watchRequestsTo(page: Page, origin: string): string[] {
   const requests: string[] = [];
   page.on("request", (request) => {
@@ -700,20 +708,18 @@ test.describe("CodeMirror workspace file editing", () => {
       "utf8",
     );
     await workspace.navigateTo();
-    const tree = page.getByTestId("file-explorer-tree-scroll");
-    if (!(await tree.isVisible())) await openFileExplorer(page);
+    await openFileExplorer(page);
     await expandFolder(page, "docs");
     await openFileFromExplorer(page, "guide.md");
-    await expectFileTabOpen(page, "guide.md");
+    await expectFileTabOpen(page, "docs/guide.md");
 
     const visibleFilePane = page.getByTestId("workspace-file-pane").filter({ visible: true });
     await expect(visibleFilePane.getByText("Guide", { exact: true })).toBeVisible();
-    const previewImages = visibleFilePane.getByTestId("markdown-preview-image");
-    await expect(previewImages).toHaveCount(2);
-    for (const image of await previewImages.locator("img").all()) {
-      await expect(image).toBeVisible();
-      await expect.poll(async () => (await image.getAttribute("src")) ?? "").not.toBe("");
-    }
+    await expectMarkdownImageLoaded(page, "sibling");
+    await expectMarkdownImageLoaded(page, "hero");
+    await visibleFilePane.screenshot({
+      path: test.info().outputPath("markdown-relative-images.png"),
+    });
   });
 
   test("previews and refreshes an HTML plan while preserving source access", async ({

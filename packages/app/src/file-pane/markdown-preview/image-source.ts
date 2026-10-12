@@ -27,6 +27,9 @@ function normalizePathSegments(value: string): string {
 
 function normalizeAbsolutePath(value: string): string | null {
   const normalizedInput = trimTrailingSeparators(value.replace(/\\/g, "/"));
+  if (isHomeRelativePath(normalizedInput)) {
+    return `~/${normalizePathSegments(normalizedInput.slice(2))}`;
+  }
   if (!isAbsolutePath(normalizedInput)) {
     return null;
   }
@@ -91,11 +94,11 @@ export function resolveMarkdownFileDirectory(input: {
   workspaceRoot?: string;
 }): string | null {
   const markdownPath = input.markdownPath.trim().replace(/\\/g, "/");
-  if (!markdownPath || isHomeRelativePath(markdownPath)) {
+  if (!markdownPath) {
     return null;
   }
 
-  if (isAbsolutePath(markdownPath)) {
+  if (isAbsolutePath(markdownPath) || isHomeRelativePath(markdownPath)) {
     const absolute = normalizeAbsolutePath(markdownPath);
     return absolute ? parentDirectory(absolute) : null;
   }
@@ -123,7 +126,9 @@ export function resolveMarkdownPreviewImageSource(input: {
     return source;
   }
 
-  const path = decodeRelativeSource(localFileSourceToPath(source));
+  const path = localFileSourceToPath(
+    source.startsWith("file://") ? source : decodeRelativeSource(source),
+  );
   if (!path) {
     return null;
   }

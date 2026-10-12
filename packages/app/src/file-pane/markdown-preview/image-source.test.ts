@@ -21,13 +21,13 @@ describe("resolveMarkdownFileDirectory", () => {
     ).toBe("/Users/test/project/docs/星谷云");
   });
 
-  it("returns null for home-relative markdown paths", () => {
+  it("preserves the host home directory for home-relative markdown paths", () => {
     expect(
       resolveMarkdownFileDirectory({
         markdownPath: "~/.paseo/plans/note.md",
         workspaceRoot: "/Users/test/project",
       }),
-    ).toBeNull();
+    ).toBe("~/.paseo/plans");
   });
 });
 
@@ -96,14 +96,34 @@ describe("resolveMarkdownPreviewImageSource", () => {
     ).toBe("/tmp/paseo-preview.png");
   });
 
-  it("falls back to the raw relative path when the markdown directory is unknown", () => {
+  it("resolves images beside a home-relative document without using the workspace root", () => {
     expect(
       resolveMarkdownPreviewImageSource({
         source: "screenshots/output.png",
         markdownPath: "~/.paseo/plans/note.md",
         workspaceRoot: "/Users/test/project",
       }),
-    ).toBe("screenshots/output.png");
+    ).toBe("~/.paseo/plans/screenshots/output.png");
+  });
+
+  it("decodes a file URI exactly once", () => {
+    expect(
+      resolveMarkdownPreviewImageSource({
+        source: "file:///tmp/hero%2520image.png",
+        markdownPath: "docs/guide.md",
+        workspaceRoot: "/workspace",
+      }),
+    ).toBe("/tmp/hero%20image.png");
+  });
+
+  it("resolves parent segments from a home-relative document", () => {
+    expect(
+      resolveMarkdownPreviewImageSource({
+        source: "../images/hero.png",
+        markdownPath: "~/docs/guide.md",
+        workspaceRoot: "/workspace",
+      }),
+    ).toBe("~/images/hero.png");
   });
 
   it("resolves Windows relative images against a drive-rooted markdown file", () => {

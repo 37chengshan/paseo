@@ -8,7 +8,6 @@ import {
   MarkdownRenderer,
   type MarkdownStyles,
 } from "@/components/markdown/renderer";
-import { MAX_CONTENT_WIDTH } from "@/constants/layout";
 import { parseMarkdownPreviewDocument } from "./document";
 import { resolveMarkdownPreviewImageSource } from "./image-source";
 import { FileMarkdownPreviewImage } from "./preview-image";
