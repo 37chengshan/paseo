@@ -142,6 +142,46 @@ async function runTestCatalogActivities(
 }
 
 describe("ProviderSnapshotManager public surface", () => {
+  test("agent creation retries a failed directory catalog without restarting the manager", async () => {
+    const cwd = resolveSnapshotCwd("/tmp/cursor-retry");
+    let attempts = 0;
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: {
+        cursor: { label: "Cursor", extends: "acp", command: ["cursor-agent", "acp"] },
+      },
+      extraClients: {
+        cursor: createExtraClient("cursor", {
+          isAvailable: async () => true,
+          async fetchCatalog() {
+            attempts++;
+            if (attempts === 1) throw new Error("Failed to initialize session services");
+            return { models: [{ provider: "cursor", id: "model", label: "Model" }], modes: [] };
+          },
+        }),
+      },
+    });
+    const create = () =>
+      manager.resolveCreateConfig({
+        cwd,
+        provider: "cursor",
+        requestedMode: undefined,
+        featureValues: undefined,
+        parent: null,
+        unattended: false,
+      });
+    try {
+      await expect(create()).rejects.toThrow("Failed to initialize session services");
+      expect(attempts).toBe(1);
+      await expect(create()).resolves.toBeDefined();
+      expect(attempts).toBe(2);
+      await create();
+      expect(attempts).toBe(2);
+    } finally {
+      manager.destroy();
+    }
+  });
+
   test("publishes one model per provider identity and retains the first definition", async () => {
     const first = { provider: "codex", id: "shared", label: "First", isDefault: true };
     const manager = new ProviderSnapshotManager({
