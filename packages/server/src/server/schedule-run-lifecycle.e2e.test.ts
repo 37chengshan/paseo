@@ -192,7 +192,13 @@ function createGitRepo(): string {
     cwd: repoDir,
     stdio: "pipe",
   });
-  return repoDir;
+  // Use Git's canonical root, as worktree creation does, including Windows path aliases.
+  return realpathSync(
+    execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: repoDir,
+      encoding: "utf8",
+    }).trim(),
+  );
 }
 
 async function createNewAgentSchedule(options: ScheduleCreateOptions): Promise<ScheduleSummary> {
