@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { AgentManager, type AgentManagerEvent } from "./agent-manager.js";
+import { AgentStorage } from "./agent-storage.js";
 import { AGENT_STREAM_COALESCE_DEFAULT_WINDOW_MS } from "./agent-stream-coalescer.js";
 import type { AgentTimelineRow } from "./agent-timeline-store-types.js";
 import { projectTimelineRows } from "./timeline-projection.js";
@@ -243,11 +244,14 @@ interface Harness {
   cleanup: () => void;
 }
 
-function createHarness(options?: { provider?: AgentProvider }): Harness {
+function createHarness(options?: { provider?: AgentProvider; storage?: boolean }): Harness {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-stream-coalescing-"));
   const client = new TestAgentClient(options?.provider ?? "codex");
   const manager = new AgentManager({
     clients: { [client.provider]: client },
+    registry: options?.storage
+      ? new AgentStorage(join(workdir, "agents"), createTestLogger())
+      : undefined,
     idFactory: createIdFactory(),
     logger: createTestLogger(),
   });
@@ -1415,6 +1419,57 @@ describe("target coalesced behavior", () => {
       ]);
       expect(getTimelineStreamEvents(harness.events, agentId)).toHaveLength(4);
     } finally {
+      harness.cleanup();
+    }
+  });
+});
+
+describe("issue 3542 deferred flush diagnosis", () => {
+  test.each(["close", "archive"] as const)(
+    "%s drains a trailing flush before tearing down agent state",
+    async (operation) => {
+      vi.useFakeTimers();
+      const harness = createHarness({ storage: true });
+      try {
+        const { agentId, session } = await createManagedSession(harness);
+        session.pushEvent(assistant("first"));
+        await waitForSessionEventQueue();
+        session.pushEvent(assistant("-pending"));
+        await waitForSessionEventQueue();
+        expect(getTimelineStreamEvents(harness.events, agentId)).toHaveLength(1);
+
+        if (operation === "close") await harness.manager.closeAgent(agentId);
+        else await harness.manager.archiveAgent(agentId);
+
+        expect(getTimelineStreamEvents(harness.events, agentId)).toHaveLength(2);
+        await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS * 2);
+        expect(getTimelineStreamEvents(harness.events, agentId)).toHaveLength(2);
+        expect(harness.manager.getAgent(agentId)).toBeNull();
+      } finally {
+        await harness.manager.flush();
+        harness.cleanup();
+      }
+    },
+  );
+
+  test("deleting retained state with a live trailing flush does not throw", async () => {
+    vi.useFakeTimers();
+    const harness = createHarness();
+    try {
+      const { agentId, session } = await createManagedSession(harness);
+      session.pushEvent(assistant("first"));
+      await waitForSessionEventQueue();
+      session.pushEvent(assistant("-pending"));
+      await waitForSessionEventQueue();
+      expect(getTimelineStreamEvents(harness.events, agentId)).toHaveLength(1);
+
+      // Diagnostic adaptation: the report does not identify the operation that
+      // deleted its timeline. Direct deletion tests that condition, rather than
+      // claiming close or archive reaches it.
+      await harness.manager.deleteAgentState(agentId);
+      await vi.advanceTimersByTimeAsync(COALESCE_WINDOW_MS * 2);
+    } finally {
+      await harness.manager.closeAgent(AGENT_IDS[0]);
       harness.cleanup();
     }
   });
