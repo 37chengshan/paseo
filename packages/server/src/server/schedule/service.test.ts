@@ -1781,7 +1781,13 @@ describe("ScheduleService", () => {
     async (targetType) => {
       const manager = new AgentManager({
         logger: createTestLogger(),
-        clients: createTestAgentClients(),
+        clients: createTestAgentClients({
+          turnFailure: {
+            error: "Requested fake provider failure",
+            code: "126",
+            diagnostic: "Provider executable failed",
+          },
+        }),
         registry: agentStorage,
       });
       const service = createScheduleService({
@@ -1815,7 +1821,7 @@ describe("ScheduleService", () => {
       await service.runOnce(schedule.id);
       expect((await service.inspect(schedule.id)).runs[0]).toMatchObject({
         status: "failed",
-        error: "Requested fake provider failure",
+        error: "Requested fake provider failure\n\ncode: 126\n\nProvider executable failed",
       });
       await manager.closeAgent(agent.id);
     },

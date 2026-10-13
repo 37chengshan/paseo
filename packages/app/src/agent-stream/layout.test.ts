@@ -105,7 +105,7 @@ function layoutFor(input: {
       strategy,
       streamHead: input.head ?? [],
     }),
-    timingByAssistantId: timingFor(...(input.timingIds ?? [])),
+    timingByResponseItemId: timingFor(...(input.timingIds ?? [])),
   });
 }
 
@@ -201,7 +201,7 @@ describe("layoutStream", () => {
       isTurnActive: true,
       history,
       liveHead,
-      timingByAssistantId: timingFor(priorAssistant.id),
+      timingByResponseItemId: timingFor(priorAssistant.id),
     });
 
     liveHead[0] = { ...liveHead[0]!, turnId: "turn-2" };
@@ -210,7 +210,7 @@ describe("layoutStream", () => {
       isTurnActive: true,
       history,
       liveHead,
-      timingByAssistantId: timingFor(priorAssistant.id),
+      timingByResponseItemId: timingFor(priorAssistant.id),
     });
 
     expect(footerOwners(first)).toEqual([]);

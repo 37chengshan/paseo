@@ -434,6 +434,13 @@ interface FinishNotificationBodyInput {
   permissionRequest?: AgentPermissionRequest;
 }
 
+function limitFinishNotificationMessage(message: string): string {
+  const text = message.trim();
+  if (text.length <= FINISH_NOTIFICATION_MESSAGE_LIMIT) return text;
+  const omitted = text.length - FINISH_NOTIFICATION_MESSAGE_LIMIT;
+  return `${text.slice(0, FINISH_NOTIFICATION_MESSAGE_LIMIT)}\n[truncated ${omitted} chars; use get_agent_activity for the full response]`;
+}
+
 function formatFinishNotificationBody(params: FinishNotificationBodyInput): string {
   const statusLine = `Agent ${params.childAgentId} (${params.title}) ${params.reason}.`;
   const sections = [statusLine];
@@ -452,20 +459,20 @@ function formatFinishNotificationBody(params: FinishNotificationBodyInput): stri
     );
   }
   if (params.reason === "errored" && params.lastError) {
-    sections.push(`<agent-error>\n${params.lastError}\n</agent-error>`);
+    sections.push(
+      `<agent-error>\n${limitFinishNotificationMessage(params.lastError)}\n</agent-error>`,
+    );
   }
-  let lastAssistantMessage = params.lastAssistantMessage?.trim();
-  if (lastAssistantMessage) {
-    if (lastAssistantMessage.length > FINISH_NOTIFICATION_MESSAGE_LIMIT) {
-      const omitted = lastAssistantMessage.length - FINISH_NOTIFICATION_MESSAGE_LIMIT;
-      lastAssistantMessage = `${lastAssistantMessage.slice(0, FINISH_NOTIFICATION_MESSAGE_LIMIT)}\n[truncated ${omitted} chars; use get_agent_activity for the full response]`;
-    }
-    sections.push(`<agent-response>\n${lastAssistantMessage}\n</agent-response>`);
+  if (params.lastAssistantMessage?.trim()) {
+    sections.push(
+      `<agent-response>\n${limitFinishNotificationMessage(params.lastAssistantMessage)}\n</agent-response>`,
+    );
   }
   return sections.join("\n\n");
 }
 
 interface NotifySafelyOptions {
+  lastError?: string;
   terminal?: boolean;
   permissionRequest?: AgentPermissionRequest;
 }
@@ -510,6 +517,7 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
   async function notify(
     reason: FinishNotificationReason,
     permissionRequest?: AgentPermissionRequest,
+    lastError?: string,
   ): Promise<void> {
     const callerRecord = await agentStorage.get(callerAgentId);
     if (callerRecord?.archivedAt) {
@@ -523,8 +531,6 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
     const title = record?.title ?? childAgentId;
     const lastAssistantMessage =
       reason === "errored" ? null : await agentManager.getLastAssistantMessage(childAgentId);
-    const lastError =
-      reason === "errored" ? agentManager.getAgent(childAgentId)?.lastError : undefined;
     const body = formatFinishNotificationBody({
       childAgentId,
       title,
@@ -554,7 +560,7 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
     if (stopped) return;
     if (options.terminal ?? true) stop();
     notificationQueue = notificationQueue
-      .then(() => notify(reason, options.permissionRequest))
+      .then(() => notify(reason, options.permissionRequest, options.lastError))
       .catch((error) => {
         logger.error(
           { err: error, childAgentId, callerAgentId, reason },
@@ -580,7 +586,7 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
     // Prior terminal state is not this task's outcome. A failure before turn start
     // is reported by the dispatch acknowledgement instead of a finish callback.
     if (agent.lifecycle === "error" && hasSeenTurn) {
-      notifySafely("errored");
+      notifySafely("errored", { lastError: agent.lastError });
       return;
     }
     // Idle is published before the terminal stream event for both completion

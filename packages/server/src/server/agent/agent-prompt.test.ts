@@ -863,56 +863,100 @@ test("a human pasting an agent envelope stays a human message through provider r
   });
 });
 
-test("errored finish notifications carry the failure rather than the earlier assistant reply", async () => {
-  const workdir = mkdtempSync(join(tmpdir(), "agent-finish-error-"));
-  const logger = createTestLogger();
-  const storage = new AgentStorage(join(workdir, "agents"), logger);
-  await storage.initialize();
-  const prompts: string[] = [];
-  const manager = new AgentManager({
-    logger,
-    registry: storage,
-    clients: createTestAgentClients({
-      onStartTurn(prompt) {
-        prompts.push(typeof prompt === "string" ? prompt : JSON.stringify(prompt));
-      },
-    }),
-  });
-  try {
-    const parent = await manager.createAgent(
-      { provider: "claude", cwd: workdir, modeId: "bypassPermissions" },
-      undefined,
-      { workspaceId: undefined },
-    );
-    const child = await manager.createAgent(
-      { provider: "claude", cwd: workdir, modeId: "bypassPermissions" },
-      undefined,
-      { workspaceId: undefined },
-    );
-    await manager.runAgent(child.id, "Earlier successful request");
-    const earlierReply = await manager.getLastAssistantMessage(child.id);
-    expect(earlierReply).toBeTruthy();
-    setupFinishNotification({
-      agentManager: manager,
-      agentStorage: storage,
-      childAgentId: child.id,
-      callerAgentId: parent.id,
-      logger,
+test.each([
+  {
+    error: "Requested fake provider failure",
+    code: "126",
+    diagnostic: "Provider executable failed",
+    closeChild: true,
+  },
+  { error: "long failure " + "x".repeat(5000), closeChild: false },
+])(
+  "errored finish notifications preserve a bounded failure while delivery waits ($closeChild)",
+  async ({ closeChild, ...failure }) => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-finish-error-"));
+    const logger = createTestLogger();
+    let releaseRead!: () => void;
+    let signalRead!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      releaseRead = resolve;
     });
-    await expect(manager.runAgent(child.id, "Emit a turn failure")).rejects.toThrow(
-      "Requested fake provider failure",
-    );
-    await vi.waitFor(() =>
+    const readStarted = new Promise<void>((resolve) => {
+      signalRead = resolve;
+    });
+    class HoldingStorage extends AgentStorage {
+      blockedAgentId: string | null = null;
+      override async get(id: string) {
+        if (id === this.blockedAgentId) {
+          signalRead();
+          await blocked;
+        }
+        return super.get(id);
+      }
+    }
+    const storage = new HoldingStorage(join(workdir, "agents"), logger);
+    await storage.initialize();
+    const prompts: string[] = [];
+    const manager = new AgentManager({
+      logger,
+      registry: storage,
+      clients: createTestAgentClients({
+        turnFailure: failure,
+        onStartTurn(prompt) {
+          prompts.push(typeof prompt === "string" ? prompt : JSON.stringify(prompt));
+        },
+      }),
+    });
+    try {
+      const parent = await manager.createAgent(
+        { provider: "claude", cwd: workdir, modeId: "bypassPermissions" },
+        undefined,
+        { workspaceId: undefined },
+      );
+      const child = await manager.createAgent(
+        { provider: "claude", cwd: workdir, modeId: "bypassPermissions" },
+        undefined,
+        { workspaceId: undefined },
+      );
+      await manager.runAgent(child.id, "Earlier successful request");
+      const earlierReply = await manager.getLastAssistantMessage(child.id);
+      expect(earlierReply).toBeTruthy();
+      storage.blockedAgentId = parent.id;
+      setupFinishNotification({
+        agentManager: manager,
+        agentStorage: storage,
+        childAgentId: child.id,
+        callerAgentId: parent.id,
+        logger,
+      });
+      await expect(manager.runAgent(child.id, "Emit a turn failure")).rejects.toThrow(
+        failure.error,
+      );
+      await readStarted;
+      if (closeChild) await manager.closeAgent(child.id);
+      releaseRead();
+      const fullReason = [
+        failure.error,
+        ...(failure.code ? [`code: ${failure.code}`] : []),
+        ...(failure.diagnostic ? [failure.diagnostic] : []),
+      ].join("\n\n");
+      const expectedReason =
+        fullReason.length > 4000
+          ? `${fullReason.slice(0, 4000)}\n[truncated ${fullReason.length - 4000} chars; use get_agent_activity for the full response]`
+          : fullReason;
+      await vi.waitFor(() =>
+        expect(
+          parseAgentMessage(prompts.find((prompt) => prompt.includes("errored.")) ?? "")?.text,
+        ).toContain(`<agent-error>\n${expectedReason}\n</agent-error>`),
+      );
       expect(
         parseAgentMessage(prompts.find((prompt) => prompt.includes("errored.")) ?? "")?.text,
-      ).toContain("<agent-error>\nRequested fake provider failure\n</agent-error>"),
-    );
-    expect(
-      parseAgentMessage(prompts.find((prompt) => prompt.includes("errored.")) ?? "")?.text,
-    ).not.toContain("<agent-response>");
-    await manager.closeAgent(child.id);
-    await manager.closeAgent(parent.id);
-  } finally {
-    rmSync(workdir, { recursive: true, force: true });
-  }
-});
+      ).not.toContain("<agent-response>");
+      if (!closeChild) await manager.closeAgent(child.id);
+      await manager.closeAgent(parent.id);
+    } finally {
+      releaseRead();
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  },
+);
