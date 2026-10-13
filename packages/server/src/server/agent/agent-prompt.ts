@@ -516,8 +516,7 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
 
   async function notify(
     reason: FinishNotificationReason,
-    permissionRequest?: AgentPermissionRequest,
-    lastError?: string,
+    { permissionRequest, lastError }: Pick<NotifySafelyOptions, "permissionRequest" | "lastError">,
   ): Promise<void> {
     const callerRecord = await agentStorage.get(callerAgentId);
     if (callerRecord?.archivedAt) {
@@ -560,7 +559,7 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
     if (stopped) return;
     if (options.terminal ?? true) stop();
     notificationQueue = notificationQueue
-      .then(() => notify(reason, options.permissionRequest, options.lastError))
+      .then(() => notify(reason, options))
       .catch((error) => {
         logger.error(
           { err: error, childAgentId, callerAgentId, reason },
