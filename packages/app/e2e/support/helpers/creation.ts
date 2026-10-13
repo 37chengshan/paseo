@@ -186,7 +186,8 @@ export async function createCreationScenario(page: Page) {
       await requests.settled();
       await expect(
         page
-          .getByText("Requested mock prompt rejection", { exact: true })
+          .getByTestId("timeline-notification")
+          .filter({ hasText: "Requested mock prompt rejection" })
           .filter({ visible: true }),
       ).toBeVisible();
       await expect(
@@ -203,7 +204,11 @@ export async function createCreationScenario(page: Page) {
     async expectPromptBeforeError(prompt: string) {
       const messages = page
         .getByTestId("user-message")
-        .or(page.getByText("Requested mock prompt rejection", { exact: true }))
+        .or(
+          page
+            .getByTestId("timeline-notification")
+            .filter({ hasText: "Requested mock prompt rejection" }),
+        )
         .filter({ visible: true });
       await expect(messages).toHaveCount(2);
       await expect(messages.nth(0)).toContainText(prompt);

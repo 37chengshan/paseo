@@ -305,7 +305,7 @@ async function retryRestoredSubmission(page: Page, prompt: string): Promise<void
 async function expectRejectedPromptBeforeError(page: Page, prompt: string, errorMessage: string) {
   const messages = page
     .getByTestId("user-message")
-    .or(page.getByText(errorMessage, { exact: true }));
+    .or(page.getByTestId("timeline-notification").filter({ hasText: errorMessage }));
   await expect(messages).toHaveCount(2);
   await expect(messages.nth(0)).toContainText(prompt);
   await expect(messages.nth(1)).toHaveText(errorMessage);
