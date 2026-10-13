@@ -9,13 +9,12 @@ import {
   expectTerminalPreviewCommand,
   expectWorkspaceOpensWithTerminalTab,
   fillTerminalPrompt,
-  seedTerminalProfiles,
+  launchTrigger,
   selectLaunchOption,
   submitTerminalLaunch,
   terminalLaunchSubmit,
   terminalPromptInput,
   type TerminalProfile,
-  type TerminalProfileSeed,
 } from "../support/helpers/new-workspace-launch";
 
 // Someone who wants a terminal agent instead of a chat: they pick a profile
@@ -25,14 +24,13 @@ import {
 //
 // The sentinel becomes `$0` (a positional shell parameter, not string
 // interpolation into the script source), so the prompt reaches the process
-// exactly as typed with no injection risk. `sleep` keeps the terminal alive
-// long enough for the UI to attach and render the output before it exits —
-// a bare `echo` exits before the frontend subscribes to its output.
+// exactly as typed with no injection risk. `cat` waits for input until project
+// cleanup kills the terminal, so attachment does not race a fixed process lifetime.
 const PROMPT_PROFILE: TerminalProfile = {
   id: "e2e-echo-prompt",
   name: "Echo Prompt",
   command: "/bin/sh",
-  args: ["-c", 'echo captured: "$0"; sleep 10', "{{{prompt}}}"],
+  args: ["-c", 'echo captured: "$0"; exec cat', "{{{prompt}}}"],
 };
 
 // No sentinel anywhere: takes no prompt, composer goes read-only.
@@ -40,20 +38,21 @@ const BARE_PROFILE: TerminalProfile = {
   id: "e2e-echo-bare",
   name: "Bare Echo",
   command: "/bin/sh",
-  args: ["-c", "echo bare-launch-static-line; sleep 10"],
+  args: ["-c", "echo bare-launch-static-line; exec cat"],
 };
+
+test.use({
+  e2eDaemonConfig: { version: 1, daemon: { terminalProfiles: [PROMPT_PROFILE, BARE_PROFILE] } },
+});
 
 test.describe("New workspace: launching a terminal", () => {
   let workspace: SeededWorkspace;
-  let profileSeed: TerminalProfileSeed;
 
   test.beforeEach(async () => {
     workspace = await seedWorkspace({ repoPrefix: "launch-terminal-" });
-    profileSeed = await seedTerminalProfiles([PROMPT_PROFILE, BARE_PROFILE]);
   });
 
   test.afterEach(async () => {
-    await profileSeed.restore();
     await workspace?.cleanup();
   });
 
@@ -88,7 +87,7 @@ test.describe("New workspace: launching a terminal", () => {
       });
       await selectLaunchOption(page, BARE_PROFILE.id);
       await expect(terminalPromptInput(page)).toHaveCount(0);
-      await expectTerminalPreviewCommand(page, "/bin/sh -c echo bare-launch-static-line; sleep 10");
+      await expectTerminalPreviewCommand(page, "/bin/sh -c echo bare-launch-static-line; exec cat");
       await expect(terminalLaunchSubmit(page)).toHaveText("Launch");
     });
 
@@ -96,6 +95,53 @@ test.describe("New workspace: launching a terminal", () => {
       await submitTerminalLaunch(page);
       await expectWorkspaceOpensWithTerminalTab(page);
       await expectTerminalOutputContains(page, "bare-launch-static-line");
+    });
+  });
+
+  test("switching terminal profiles restores the prompt and its fullscreen affordance", async ({
+    page,
+  }) => {
+    await gotoAppShell(page);
+    await waitForSidebarHydration(page);
+    await openNewWorkspaceComposer(page, {
+      projectKey: workspace.projectKey,
+      projectDisplayName: workspace.projectDisplayName,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const prompt = "First replacement line\nSecond replacement line\nThird replacement line";
+    const selectProfile = async (profile: TerminalProfile) => {
+      await launchTrigger(page).click();
+      const option = page.getByRole("menuitem").filter({ hasText: profile.name });
+      await option.click();
+      await expect(option).not.toBeVisible();
+    };
+    const fullscreen = page.getByRole("button", { name: "Fullscreen", exact: true });
+
+    await test.step("restore a multiline prompt after a read-only profile", async () => {
+      await selectProfile(PROMPT_PROFILE);
+      await fillTerminalPrompt(page, prompt);
+      await expect(fullscreen).toBeVisible();
+      await selectProfile(BARE_PROFILE);
+      await expect(terminalPromptInput(page)).toHaveCount(0);
+      await selectProfile(PROMPT_PROFILE);
+      await expect(terminalPromptInput(page)).toHaveValue(prompt);
+      await expect(fullscreen).toBeVisible();
+    });
+
+    await test.step("restore the locally edited prompt and measure subsequent typing", async () => {
+      await fillTerminalPrompt(page, "Short draft");
+      await expect(fullscreen).toHaveCount(0);
+      await selectProfile(BARE_PROFILE);
+      await selectProfile(PROMPT_PROFILE);
+      await expect(terminalPromptInput(page)).toHaveValue("Short draft");
+      await expect(fullscreen).toHaveCount(0);
+      await terminalPromptInput(page).press("End");
+      await terminalPromptInput(page).press("Shift+Enter");
+      await terminalPromptInput(page).pressSequentially("Second");
+      await terminalPromptInput(page).press("Shift+Enter");
+      await terminalPromptInput(page).pressSequentially("Third");
+      await expect(terminalPromptInput(page)).toHaveValue("Short draft\nSecond\nThird");
+      await expect(fullscreen).toBeVisible();
     });
   });
 });

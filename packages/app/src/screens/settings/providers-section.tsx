@@ -22,7 +22,7 @@ import {
   type AcpProviderCatalogItem,
 } from "@/hooks/use-acp-provider-catalog";
 import { ProviderCatalogList } from "@/components/provider-catalog-list";
-import { getProviderIcon } from "@/components/provider-icons";
+import { useProviderIcon } from "@/components/provider-icons";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -31,7 +31,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { SettingsSection } from "@/screens/settings/settings-section";
+import { SettingsSection } from "@/components/settings/headings/settings-section";
 import { useProviderSettingsStore } from "@/stores/provider-settings-store";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { filterSelectableModels } from "@/provider-selection/model-catalog";
@@ -77,6 +77,7 @@ function getProviderStatus(
 }
 
 interface ProviderRowProps {
+  serverId: string;
   def: ProviderDefinition;
   entry: ProviderEntry;
   enabled: boolean;
@@ -167,6 +168,7 @@ function ProviderActionsMenu({
 }
 
 function ProviderRow({
+  serverId,
   def,
   entry,
   enabled,
@@ -181,7 +183,7 @@ function ProviderRow({
   const { t } = useTranslation();
   const { theme } = useUnistyles();
   const isCompact = useIsCompactFormFactor();
-  const ProviderIcon = getProviderIcon(def.id);
+  const ProviderIcon = useProviderIcon(def.id, serverId);
   const providerError =
     enabled &&
     entry.status === "error" &&
@@ -326,7 +328,7 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
   const isConnected = useHostRuntimeIsConnected(serverId);
   const supportsProviderRemoval = useHostFeature(serverId, "providerRemoval");
   const { entries, isLoading, refresh } = useProvidersSnapshot(serverId);
-  const { patchConfig } = useDaemonConfig(serverId);
+  const { config, patchConfig } = useDaemonConfig(serverId);
   const openProviderSettings = useProviderSettingsStore((state) => state.open);
   const [pendingProviderId, setPendingProviderId] = useState<string | null>(null);
   const [removingProviderId, setRemovingProviderId] = useState<string | null>(null);
@@ -335,6 +337,12 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
 
   const providerDefinitions = useMemo(() => buildProviderDefinitions(entries), [entries]);
   const hasServer = serverId.length > 0;
+
+  /** Custom providers are deletable only when config.json holds their `extends` definition. */
+  const isConfigOwnedProvider = useCallback(
+    (providerId: string) => Boolean(config?.providers?.[providerId]?.extends),
+    [config],
+  );
 
   const handleOpenProviderSettings = useCallback(
     (providerId: string) => {
@@ -436,12 +444,17 @@ export function ProvidersSection({ serverId }: ProvidersSectionProps) {
               return (
                 <ProviderRow
                   key={def.id}
+                  serverId={serverId}
                   def={def}
                   entry={entry}
                   enabled={entry.enabled ?? true}
                   isToggling={pendingProviderId === def.id}
                   isRemoving={removingProviderId === def.id}
-                  canRemove={supportsProviderRemoval && entry.source === "custom"}
+                  canRemove={
+                    supportsProviderRemoval &&
+                    entry.source === "custom" &&
+                    isConfigOwnedProvider(def.id)
+                  }
                   isFirst={index === 0}
                   onPress={handleOpenProviderSettings}
                   onToggleEnabled={handleToggleEnabled}

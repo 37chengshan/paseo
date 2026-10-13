@@ -82,6 +82,7 @@ class WorkspaceStatus {
       workspaceDirectory: workspace.cwd,
       projectKind: "git",
       workspaceKind: workspace.kind,
+      background: workspace.background,
       name: workspace.displayName,
       archivingAt: null,
       status: "done",
@@ -571,7 +572,9 @@ describe("WorkspaceDirectory empty projects", () => {
         workspaceDirectory: workspace.cwd,
         projectKind: "non_git",
         workspaceKind: workspace.kind,
+        background: workspace.background,
         name: workspace.displayName,
+        ...(workspace.internal ? { background: true } : {}),
         archivingAt: null,
         status: "done",
         activityAt: null,
@@ -644,4 +647,88 @@ describe("WorkspaceDirectory empty projects", () => {
 
     expect(result.emptyProjects.map((p) => p.projectId)).toEqual(["empty"]);
   });
+
+  test("hides background workspaces and counts their project as empty unless includeBackground", async () => {
+    const directory = makeDirectory({
+      projects: [project({ projectId: "hidden-only" })],
+      workspaces: [
+        {
+          workspaceId: "ws-internal",
+          projectId: "hidden-only",
+          cwd: "/workspace/hidden-only",
+          kind: "directory",
+          displayName: "helper",
+          createdAt: NOW,
+          updatedAt: NOW,
+          archivedAt: null,
+          background: true,
+        },
+      ],
+    });
+
+    const hidden = await directory.listFetchEntries({
+      type: "fetch_workspaces_request",
+      requestId: "r1",
+      filter: { query: "helper" },
+    });
+    expect(hidden.entries).toEqual([]);
+    expect(hidden.emptyProjects.map((p) => p.projectId)).toEqual(["hidden-only"]);
+
+    const shown = await directory.listFetchEntries({
+      type: "fetch_workspaces_request",
+      requestId: "r2",
+      filter: { includeBackground: true },
+    });
+    expect(shown.entries.map((entry) => entry.id)).toEqual(["ws-internal"]);
+    expect(shown.emptyProjects).toEqual([]);
+  });
+});
+
+test("Git observation targets exclude archived records without hydrating app descriptors", async () => {
+  const workspace = (
+    id: string,
+    projectId: string,
+    archivedAt: string | null = null,
+  ): PersistedWorkspaceRecord => ({
+    workspaceId: id,
+    projectId,
+    cwd: `/workspace/${id}`,
+    kind: "local_checkout",
+    displayName: id,
+    createdAt: NOW,
+    updatedAt: NOW,
+    archivedAt,
+  });
+  const project = (id: string, archivedAt: string | null = null): PersistedProjectRecord => ({
+    projectId: id,
+    rootPath: `/workspace/${id}`,
+    kind: "git",
+    displayName: id,
+    customName: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+    archivedAt,
+  });
+  const unexpectedHydration = async (): Promise<never> => {
+    throw new Error("Watcher reconciliation hydrated app data");
+  };
+  const directory = new WorkspaceDirectory({
+    logger: createTestLogger(),
+    projectRegistry: { list: async () => [project("active"), project("archived", NOW)] },
+    workspaceRegistry: {
+      list: async () => [
+        workspace("observed", "active"),
+        workspace("hidden", "active", NOW),
+        workspace("hidden-project", "archived"),
+      ],
+    },
+    listAgentPayloads: unexpectedHydration,
+    listProviderSubagentActivity: unexpectedHydration,
+    listTerminalActivityContributions: unexpectedHydration,
+    buildWorkspaceDescriptor: unexpectedHydration,
+    isProviderVisibleToClient: () => true,
+  });
+  expect(await directory.listObservationTargets()).toEqual([
+    { id: "observed", workspaceDirectory: "/workspace/observed", workspaceKind: "local_checkout" },
+  ]);
 });

@@ -10,7 +10,7 @@ function image(dataUrl = "data:image/png;base64,capture"): BrowserCaptureImage {
 }
 
 function harness(guest: BrowserCaptureGuest | null = null) {
-  const clipboard = { write: vi.fn(), writeImage: vi.fn(), writeText: vi.fn() };
+  const clipboard = { write: vi.fn(async () => undefined) };
   const decodeImage = vi.fn(() => image("data:image/png;base64,clipboard"));
   const warn = vi.fn();
   return {
@@ -29,7 +29,7 @@ function harness(guest: BrowserCaptureGuest | null = null) {
 describe("browser capture service", () => {
   it("validates and rounds guest-relative bounds before capture", async () => {
     const capturePage = vi.fn(async () => image());
-    const { service } = harness({ isDestroyed: () => false, capturePage });
+    const { service } = harness({ isDestroyed: () => false, getZoomFactor: () => 1, capturePage });
 
     await expect(
       service.capture({
@@ -41,9 +41,25 @@ describe("browser capture service", () => {
     expect(capturePage).toHaveBeenCalledWith({ x: 0, y: 9, width: 20, height: 11 });
   });
 
+  it("captures the selected element when the page is zoomed", async () => {
+    const capturePage = vi.fn(async () => image());
+    const { service } = harness({
+      isDestroyed: () => false,
+      getZoomFactor: () => 1.2,
+      capturePage,
+    });
+
+    await service.capture({
+      browserId: "browser-1",
+      hostWebContentsId: 42,
+      rect: { x: 300, y: 200, width: 120, height: 60 },
+    });
+    expect(capturePage).toHaveBeenCalledWith({ x: 360, y: 240, width: 144, height: 72 });
+  });
+
   it("rejects invalid or unavailable captures without touching the guest", async () => {
     const capturePage = vi.fn(async () => image());
-    const { service } = harness({ isDestroyed: () => false, capturePage });
+    const { service } = harness({ isDestroyed: () => false, getZoomFactor: () => 1, capturePage });
 
     await expect(
       service.capture({ browserId: "browser-1", hostWebContentsId: 42, rect: { width: 0 } }),
@@ -51,16 +67,21 @@ describe("browser capture service", () => {
     expect(capturePage).not.toHaveBeenCalled();
   });
 
-  it("writes text and a decoded image to the clipboard atomically", () => {
+  it("writes text and a decoded image to the clipboard atomically", async () => {
     const { service, clipboard } = harness();
-    expect(service.copy({ text: "button", imageDataUrl: "data:image/png;base64,value" })).toBe(
-      true,
-    );
+    await expect(
+      service.copy({ text: "button", imageDataUrl: "data:image/png;base64,value" }),
+    ).resolves.toBe(true);
     expect(clipboard.write).toHaveBeenCalledWith({
       text: "button",
       image: expect.any(Object),
     });
-    expect(clipboard.writeText).not.toHaveBeenCalled();
-    expect(clipboard.writeImage).not.toHaveBeenCalled();
+  });
+
+  it("keeps text-only clipboard writes", async () => {
+    const { service, clipboard } = harness();
+
+    await expect(service.copy({ text: "button" })).resolves.toBe(true);
+    expect(clipboard.write).toHaveBeenCalledWith({ text: "button", image: null });
   });
 });

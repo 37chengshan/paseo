@@ -13,8 +13,8 @@ import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-moda
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Combobox, ComboboxItem, type ComboboxOption } from "@/components/ui/combobox";
-import { getProviderIcon } from "@/components/provider-icons";
-import { formatTimeAgo } from "@/utils/time";
+import { useProviderIcon, useProviderIcons } from "@/components/provider-icons";
+import { useTimeAgo } from "@/hooks/use-time-ago";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useHostProjects } from "@/projects/host-projects";
@@ -290,12 +290,14 @@ function SheetEmptyState({ title }: { title: string }) {
 }
 
 function ImportSessionSheetRow({
+  serverId,
   entry,
   disabled,
   importing,
   folder,
   onImportSession,
 }: {
+  serverId: string | null;
   entry: FetchRecentProviderSessionEntry;
   disabled: boolean;
   importing: boolean;
@@ -307,8 +309,7 @@ function ImportSessionSheetRow({
   const { t } = useTranslation();
   const title = getSessionTitle(entry);
   const promptPreview = getPromptPreview(entry);
-  const lastActivity = formatTimeAgo(new Date(entry.lastActivityAt));
-  const ProviderIcon = getProviderIcon(entry.providerId);
+  const ProviderIcon = useProviderIcon(entry.providerId, serverId);
   const accessibilityState = useMemo(
     () => (disabled ? DISABLED_ACCESSIBILITY_STATE : undefined),
     [disabled],
@@ -342,9 +343,11 @@ function ImportSessionSheetRow({
           <Text style={styles.rowTitle} numberOfLines={1}>
             {title}
           </Text>
-          <Text style={styles.rowMeta}>
-            {importing ? t("importSession.row.importing") : lastActivity}
-          </Text>
+          {importing ? (
+            <Text style={styles.rowMeta}>{t("importSession.row.importing")}</Text>
+          ) : (
+            <ImportSessionActivityTime date={entry.lastActivityAt} />
+          )}
         </View>
         <Text style={styles.rowPreview} numberOfLines={2}>
           {promptPreview}
@@ -363,13 +366,20 @@ function ImportSessionSheetRow({
   );
 }
 
+function ImportSessionActivityTime({ date }: { date: string }) {
+  const label = useTimeAgo(new Date(date));
+  return <Text style={styles.rowMeta}>{label}</Text>;
+}
+
 function SessionRows({
+  serverId,
   entries,
   disabled,
   importingSessionKey,
   resolveFolder,
   onImportSession,
 }: {
+  serverId: string | null;
   entries: ReadonlyArray<FetchRecentProviderSessionEntry>;
   disabled: boolean;
   importingSessionKey: string | null;
@@ -381,6 +391,7 @@ function SessionRows({
       {entries.map((entry) => (
         <ImportSessionSheetRow
           key={`${entry.providerId}:${entry.providerHandleId}`}
+          serverId={serverId}
           entry={entry}
           disabled={disabled}
           importing={importingSessionKey === `${entry.providerId}:${entry.providerHandleId}`}
@@ -548,6 +559,8 @@ export function ImportSessionSheet({
     setIsFilterOpen(false);
   }, []);
 
+  const getProviderIcon = useProviderIcons(serverId);
+  const SelectedProviderIcon = useProviderIcon(selectedProvider, serverId);
   const filterOptionIcons = useMemo(() => {
     const map = new Map<string, React.ReactNode>();
     map.set(ALL_FILTER_VALUE, <Layers size={14} color={theme.colors.foregroundMuted} />);
@@ -556,7 +569,7 @@ export function ImportSessionSheet({
       map.set(provider, <ProviderIcon size={14} color={theme.colors.foregroundMuted} />);
     }
     return map;
-  }, [filterProviders, theme.colors.foregroundMuted]);
+  }, [filterProviders, getProviderIcon, theme.colors.foregroundMuted]);
 
   const renderFilterOption = useCallback(
     ({
@@ -735,10 +748,7 @@ export function ImportSessionSheet({
             {selectedProvider === ALL_FILTER_VALUE ? (
               <Layers size={14} color={theme.colors.foregroundMuted} />
             ) : (
-              (() => {
-                const ProviderIcon = getProviderIcon(selectedProvider);
-                return <ProviderIcon size={14} color={theme.colors.foregroundMuted} />;
-              })()
+              <SelectedProviderIcon size={14} color={theme.colors.foregroundMuted} />
             )}
             <Text style={styles.filterTriggerText} numberOfLines={1}>
               {selectedProviderLabel}
@@ -773,6 +783,7 @@ export function ImportSessionSheet({
       ) : null}
       {visibleEntries.length > 0 ? (
         <SessionRows
+          serverId={serverId}
           entries={visibleEntries}
           disabled={importMutation.isPending}
           importingSessionKey={importingSessionKey}
