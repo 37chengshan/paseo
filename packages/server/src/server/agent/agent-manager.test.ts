@@ -3966,11 +3966,7 @@ test("a prompt after provider replacement reopens the stale session", async () =
     expect(timeline.filter((item) => item.type === "user_message")).toMatchObject([
       { text: "continue after reload", clientMessageId: "stale-session-retry" },
     ]);
-    expect(
-      timeline.some(
-        (item) => item.type === "assistant_message" && item.text.includes("[System Error]"),
-      ),
-    ).toBe(false);
+    expect(timeline.some((item) => item.type === "error")).toBe(false);
   } finally {
     await manager.closeAgent(created.id).catch(() => undefined);
     await manager.flush().catch(() => undefined);
@@ -7032,64 +7028,78 @@ test("ignores stale autonomous terminals without lowering the active turn lifecy
   });
 });
 
-test("preserves terminal fallback and separates untracked failure activity", async () => {
-  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-untracked-terminal-"));
-  const storage = new AgentStorage(join(workdir, "agents"), logger);
-  let capturedSession: TestAgentSession | null = null;
+test.each(["Task completed.", "[System Error] untracked failure"])(
+  "preserves terminal fallback and separates untracked failure activity after %s",
+  async (assistantText) => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-untracked-terminal-"));
+    const storage = new AgentStorage(join(workdir, "agents"), logger);
+    let capturedSession: TestAgentSession | null = null;
 
-  class LiveEventClient extends TestAgentClient {
-    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
-      capturedSession = new TestAgentSession(config);
-      return capturedSession;
+    class LiveEventClient extends TestAgentClient {
+      override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+        capturedSession = new TestAgentSession(config);
+        return capturedSession;
+      }
     }
-  }
 
-  const manager = new AgentManager({
-    clients: { codex: new LiveEventClient() },
-    registry: storage,
-    logger,
-    idFactory: () => "00000000-0000-4000-8000-000000000136",
-  });
-  const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
-    workspaceId: undefined,
-  });
-  await manager.appendTimelineItem(snapshot.id, {
-    type: "assistant_message",
-    text: "Task completed.",
-    messageId: "assistant-1",
-  });
-
-  capturedSession!.pushEvent({
-    type: "turn_failed",
-    provider: "codex",
-    turnId: "untracked-turn",
-    error: "untracked failure",
-  });
-
-  await vi.waitFor(() => {
-    const failed = manager.getAgent(snapshot.id);
-    expect(failed?.lifecycle).toBe("error");
-    expect(failed?.lastError).toBe("untracked failure");
-  });
-  expect(manager.getTimeline(snapshot.id)).toContainEqual(
-    expect.objectContaining({
-      type: "error",
-      message: expect.stringContaining("untracked failure"),
-    }),
-  );
-  const projected = projectTimelineRows({
-    rows: await manager.getTimelineRows(snapshot.id),
-    mode: "projected",
-  });
-  expect(projected.map((entry) => entry.item)).toEqual([
-    {
+    const manager = new AgentManager({
+      clients: { codex: new LiveEventClient() },
+      registry: storage,
+      logger,
+      idFactory: () => "00000000-0000-4000-8000-000000000136",
+    });
+    const snapshot = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: undefined,
+    });
+    const events: AgentManagerEvent[] = [];
+    manager.subscribe((event) => events.push(event), { agentId: snapshot.id, replayState: false });
+    await manager.appendTimelineItem(snapshot.id, {
       type: "assistant_message",
-      text: "Task completed.",
+      text: assistantText,
       messageId: "assistant-1",
-    },
-    { type: "error", message: "untracked failure" },
-  ]);
-});
+    });
+
+    capturedSession!.pushEvent({
+      type: "turn_failed",
+      provider: "codex",
+      turnId: "untracked-turn",
+      error: "untracked failure",
+    });
+
+    await vi.waitFor(() => {
+      const failed = manager.getAgent(snapshot.id);
+      expect(failed?.lifecycle).toBe("error");
+      expect(failed?.lastError).toBe("untracked failure");
+    });
+    expect(manager.getTimeline(snapshot.id)).toContainEqual(
+      expect.objectContaining({
+        type: "error",
+        message: expect.stringContaining("untracked failure"),
+      }),
+    );
+    const projected = projectTimelineRows({
+      rows: await manager.getTimelineRows(snapshot.id),
+      mode: "projected",
+    });
+    expect(projected.map((entry) => entry.item)).toEqual([
+      {
+        type: "assistant_message",
+        text: assistantText,
+        messageId: "assistant-1",
+      },
+      { type: "error", message: "untracked failure" },
+    ]);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "agent_stream",
+        event: expect.objectContaining({
+          type: "timeline",
+          item: { type: "error", message: "untracked failure" },
+        }),
+      }),
+    );
+  },
+);
 
 test("cancelAgentRun waits for an acknowledged autonomous interrupt to settle", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-live-cancel-"));
@@ -8374,7 +8384,7 @@ test("streamAgent clears pending run when startTurn fails before a turn id exist
       clientMessageId: "rejected-prompt",
       messageId: "rejected-prompt",
     },
-    { type: "assistant_message", text: "[System Error] Invalid request: missing field `text`" },
+    { type: "error", message: "Invalid request: missing field `text`" },
   ]);
 
   await expect(manager.runAgent(agent.id, "second turn")).resolves.toEqual(
