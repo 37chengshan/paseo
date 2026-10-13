@@ -57,8 +57,8 @@ interface LayoutSegmentInput {
   phase: "streaming" | "complete";
 }
 
-interface AssistantFooterSource {
-  item: Extract<StreamItem, { kind: "assistant_message" }>;
+interface ResponseFooterSource {
+  item: Extract<StreamItem, { kind: "assistant_message" | "notification" }>;
   items: StreamItem[];
   index: number;
 }
@@ -77,13 +77,13 @@ function createTurnFooterHost(input: {
   };
 }
 
-function findLatestAssistantInResponse(input: {
+function findLatestFooterSourceInResponse(input: {
   strategy: StreamStrategy;
   items: StreamItem[];
   startIndex: number;
   boundaryAboveItems?: StreamItem[] | null;
   boundaryAboveIndex?: number | null;
-}): AssistantFooterSource | null {
+}): ResponseFooterSource | null {
   let items = input.items;
   let index = input.startIndex;
   let canCrossBoundary = true;
@@ -99,7 +99,10 @@ function findLatestAssistantInResponse(input: {
       if (!item || (laterItem && !continuesResponse(item, laterItem))) {
         return null;
       }
-      if (item.kind === "assistant_message") {
+      if (
+        item.kind === "assistant_message" ||
+        (item.kind === "notification" && item.sourceType === "error")
+      ) {
         return { item, items, index };
       }
       laterItem = item;
@@ -131,19 +134,19 @@ function resolveAuxiliaryTurnFooter(input: StreamLayoutInput): TurnFooterHost | 
     return null;
   }
 
-  const assistant = findLatestAssistantInResponse({
+  const source = findLatestFooterSourceInResponse({
     strategy: input.strategy,
     items: footerItems,
     startIndex: latestIndex,
   });
-  if (!assistant) {
+  if (!source) {
     return null;
   }
 
   return createTurnFooterHost({
-    item: assistant.item,
-    items: assistant.items,
-    index: assistant.index,
+    item: source.item,
+    items: source.items,
+    index: source.index,
     timingByAssistantId: input.timingByAssistantId,
   });
 }
@@ -163,20 +166,20 @@ function resolveCompletedFooter(input: {
     return null;
   }
 
-  const assistant = findLatestAssistantInResponse({
+  const source = findLatestFooterSourceInResponse({
     strategy: input.strategy,
     items: input.items,
     startIndex: input.index,
     boundaryAboveItems: input.boundaryAboveItems,
     boundaryAboveIndex: input.boundaryAboveIndex,
   });
-  if (!assistant || input.auxiliaryTurnFooter?.itemId === assistant.item.id) {
+  if (!source || input.auxiliaryTurnFooter?.itemId === source.item.id) {
     return null;
   }
   return createTurnFooterHost({
-    item: assistant.item,
-    items: assistant.items,
-    index: assistant.index,
+    item: source.item,
+    items: source.items,
+    index: source.index,
     timingByAssistantId: input.timingByAssistantId,
   });
 }

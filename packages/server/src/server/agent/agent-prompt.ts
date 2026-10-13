@@ -430,6 +430,7 @@ interface FinishNotificationBodyInput {
   title: string;
   reason: FinishNotificationReason;
   lastAssistantMessage: string | null;
+  lastError?: string;
   permissionRequest?: AgentPermissionRequest;
 }
 
@@ -449,6 +450,9 @@ function formatFinishNotificationBody(params: FinishNotificationBodyInput): stri
         2,
       )}\n</permission-request>`,
     );
+  }
+  if (params.reason === "errored" && params.lastError) {
+    sections.push(`<agent-error>\n${params.lastError}\n</agent-error>`);
   }
   let lastAssistantMessage = params.lastAssistantMessage?.trim();
   if (lastAssistantMessage) {
@@ -517,12 +521,16 @@ export function setupFinishNotification(params: SetupFinishNotificationParams): 
       return;
     }
     const title = record?.title ?? childAgentId;
-    const lastAssistantMessage = await agentManager.getLastAssistantMessage(childAgentId);
+    const lastAssistantMessage =
+      reason === "errored" ? null : await agentManager.getLastAssistantMessage(childAgentId);
+    const lastError =
+      reason === "errored" ? agentManager.getAgent(childAgentId)?.lastError : undefined;
     const body = formatFinishNotificationBody({
       childAgentId,
       title,
       reason,
       lastAssistantMessage,
+      lastError,
       permissionRequest,
     });
 

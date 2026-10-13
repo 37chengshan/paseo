@@ -15,6 +15,7 @@ import { join } from "node:path";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import { AgentManager } from "./agent-manager.js";
+import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
 import { AgentStorage } from "./agent-storage.js";
 import { setupFinishNotification, waitForAgentRunStartWithTimeout } from "./agent-prompt.js";
 import type { AgentManagerEvent, ManagedAgent } from "./agent-manager.js";
@@ -860,4 +861,58 @@ test("a human pasting an agent envelope stays a human message through provider r
     messageId: "provider-echo",
     clientMessageId: "human-submission",
   });
+});
+
+test("errored finish notifications carry the failure rather than the earlier assistant reply", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-finish-error-"));
+  const logger = createTestLogger();
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  await storage.initialize();
+  const prompts: string[] = [];
+  const manager = new AgentManager({
+    logger,
+    registry: storage,
+    clients: createTestAgentClients({
+      onStartTurn(prompt) {
+        prompts.push(typeof prompt === "string" ? prompt : JSON.stringify(prompt));
+      },
+    }),
+  });
+  try {
+    const parent = await manager.createAgent(
+      { provider: "claude", cwd: workdir, modeId: "bypassPermissions" },
+      undefined,
+      { workspaceId: undefined },
+    );
+    const child = await manager.createAgent(
+      { provider: "claude", cwd: workdir, modeId: "bypassPermissions" },
+      undefined,
+      { workspaceId: undefined },
+    );
+    await manager.runAgent(child.id, "Earlier successful request");
+    const earlierReply = await manager.getLastAssistantMessage(child.id);
+    expect(earlierReply).toBeTruthy();
+    setupFinishNotification({
+      agentManager: manager,
+      agentStorage: storage,
+      childAgentId: child.id,
+      callerAgentId: parent.id,
+      logger,
+    });
+    await expect(manager.runAgent(child.id, "Emit a turn failure")).rejects.toThrow(
+      "Requested fake provider failure",
+    );
+    await vi.waitFor(() =>
+      expect(
+        parseAgentMessage(prompts.find((prompt) => prompt.includes("errored.")) ?? "")?.text,
+      ).toContain("<agent-error>\nRequested fake provider failure\n</agent-error>"),
+    );
+    expect(
+      parseAgentMessage(prompts.find((prompt) => prompt.includes("errored.")) ?? "")?.text,
+    ).not.toContain("<agent-response>");
+    await manager.closeAgent(child.id);
+    await manager.closeAgent(parent.id);
+  } finally {
+    rmSync(workdir, { recursive: true, force: true });
+  }
 });
