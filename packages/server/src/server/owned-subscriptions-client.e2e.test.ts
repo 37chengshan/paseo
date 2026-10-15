@@ -169,3 +169,47 @@ test("a restored public SDK timeline leaves missed history to the consumer", asy
     await daemon.close();
   }
 });
+
+test("active directory observers agree on creation and workspace archive across clients", async () => {
+  const daemon = await createTestPaseoDaemon({ mcpEnabled: false });
+  const actor = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws`, appVersion: "0.8.0" });
+  const observer = new DaemonClient({
+    url: `ws://127.0.0.1:${daemon.port}/ws`,
+    appVersion: "0.8.0",
+  });
+  const directory = new Set<string>();
+  try {
+    await actor.connect();
+    await observer.connect();
+    const subscription = observer.observeAgents({
+      scope: "active",
+      sync: {},
+      includeBackground: true,
+    });
+    subscription.subscribe({
+      snapshot: () => {},
+      update: (message) => {
+        if (message.type !== "agent_update") return;
+        if (message.payload.kind === "upsert") directory.add(message.payload.agent.id);
+        else directory.delete(message.payload.agentId);
+      },
+    });
+    await subscription.ready;
+    const agent = await actor.createAgent({
+      provider: "codex",
+      cwd: daemon.staticDir,
+      title: "Cross-client agent",
+    });
+    await expect.poll(() => directory.has(agent.id)).toBe(true);
+    const beforeArchive = await observer.fetchAgents({ scope: "active", sync: {} });
+    expect(beforeArchive.entries.map((entry) => entry.agent.id)).toContain(agent.id);
+    await actor.archiveWorkspace(agent.workspaceId!);
+    const afterArchive = await observer.fetchAgents({ scope: "active", sync: {} });
+    expect(afterArchive.entries.map((entry) => entry.agent.id)).not.toContain(agent.id);
+    await expect.poll(() => directory.has(agent.id)).toBe(false);
+  } finally {
+    await actor.close();
+    await observer.close();
+    await daemon.close();
+  }
+});
