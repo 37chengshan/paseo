@@ -3384,10 +3384,14 @@ function buildCodexCustomProviderConfig(
     providerConfig.env_key = "OPENAI_API_KEY";
     providerConfig.requires_openai_auth = false;
   }
+  // Namespace Paseo ids so they cannot override Codex's built-ins. A colon is
+  // forbidden in Paseo ids, keeping these keys distinct from every legacy id
+  // when both generations are listed together.
+  const providerKey = `paseo:${customProvider.id}`;
   return {
-    model_provider: customProvider.id,
+    model_provider: providerKey,
     model_providers: {
-      [customProvider.id]: providerConfig,
+      [providerKey]: providerConfig,
     },
   };
 }
@@ -4061,6 +4065,11 @@ export class CodexAppServerAgentSession implements AgentSession {
   private async ensureThreadLoaded(): Promise<void> {
     if (!this.client || !this.currentThreadId) return;
     const params: Record<string, unknown> = { threadId: this.currentThreadId };
+    if (this.deps.customCodexConfig) {
+      // Resume otherwise prefers the provider stored on the thread, including
+      // the unnamespaced key emitted by earlier Paseo versions.
+      params.modelProvider = this.deps.customCodexConfig.model_provider;
+    }
     const developerInstructions = composeSystemPromptParts(
       this.config.systemPrompt,
       this.config.daemonAppendSystemPrompt,
@@ -7344,12 +7353,14 @@ export class CodexAppServerAgentClient implements AgentClient {
       const listLimit = options?.cwd ? Math.max(scanLimit, 50) : scanLimit;
       // Codex records each thread under the model provider that ran it and,
       // unless told otherwise, lists only the provider its own config selects.
-      // A custom provider runs under its own id, so ask for exactly that one.
+      // Include the original id for sessions created before namespacing.
       const customProviderConfig = this.customProviderConfig();
       const allThreads = await readCodexThreadWindow(client, this.logger, {
         limit: listLimit,
         cwd: options?.cwd,
-        ...(customProviderConfig ? { modelProviders: [customProviderConfig.model_provider] } : {}),
+        ...(customProviderConfig && this.deps.customProvider
+          ? { modelProviders: [customProviderConfig.model_provider, this.deps.customProvider.id] }
+          : {}),
       });
       const threads = filterCodexThreadsByCwd(allThreads, options?.cwd);
       return threads.slice(0, limit).map((thread) => {
