@@ -230,3 +230,22 @@ it("does not restore a targeted cached workspace while its archive is pending", 
     store.clearSession(serverId);
   }
 });
+
+it("keeps the failed first turn out of Working when the creation response arrives last", () => {
+  const serverId = "failed-first-turn-creation";
+  const store = useSessionStore.getState();
+  store.initializeSession(serverId, null as unknown as DaemonClient);
+  try {
+    const replica = new WorkspaceDirectoryReplica(serverId);
+    const descriptor = workspace("failed-first-turn");
+    replica.applyDelta({ kind: "upsert", workspace: { ...descriptor, status: "running" } });
+    replica.applyDelta({ kind: "upsert", workspace: { ...descriptor, status: "failed" } });
+    // The new-workspace screen turns its older creation response into a running snapshot.
+    replica.acceptWorkspaces([normalizeWorkspaceDescriptor({ ...descriptor, status: "running" })]);
+    expect(
+      useSessionStore.getState().sessions[serverId]?.workspaces.get(descriptor.id)?.status,
+    ).toBe("failed");
+  } finally {
+    store.clearSession(serverId);
+  }
+});
