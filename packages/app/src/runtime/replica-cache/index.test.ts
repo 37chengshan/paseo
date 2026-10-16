@@ -301,6 +301,19 @@ describe("ReplicaCache", () => {
     expect(storage.rows.size).toBe(0);
   });
 
+  it("preserves background visibility when restoring a cached workspace", async () => {
+    const storage = new MemoryStorage();
+    const writer = createCache(storage);
+    const original = directory();
+    original.workspaces.get("workspace-1")!.background = true;
+    commitDirectory(writer, SERVER_ID, original);
+    await writer.flush();
+
+    const reader = createCache(storage);
+    const restored = await reader.readDirectory(SERVER_ID);
+    expect(restored.workspaces.get("workspace-1")?.background).toBe(true);
+  });
+
   it("round-trips explicit directory and timeline commits", async () => {
     const storage = new MemoryStorage();
     const writer = createCache(storage);
