@@ -1831,6 +1831,7 @@ export const ImportAgentRequestMessageSchema = z.object({
   cwd: z.string().optional(),
   workspaceId: z.string().optional(),
   labels: z.record(z.string(), z.string()).optional(),
+  modeId: z.string().optional(),
   requestId: z.string(),
 });
 
