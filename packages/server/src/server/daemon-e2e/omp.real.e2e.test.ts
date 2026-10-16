@@ -131,6 +131,15 @@ async function timeline(client: DaemonClient, agentId: string): Promise<AgentTim
   return result.entries.map((entry) => entry.item);
 }
 
+function compactionFiller(records = 1200): string {
+  const teas = ["assam", "darjeeling", "sencha", "oolong"];
+  return Array.from(
+    { length: records },
+    (_, index) =>
+      `Record ${String(index).padStart(5, "0")}: tea=${teas[index % teas.length]} origin=region-${index % 37} notes=lorem ipsum dolor sit amet`,
+  ).join("\n");
+}
+
 function latestTools(items: AgentTimelineItem[]) {
   const latest = new Map<string, Extract<AgentTimelineItem, { type: "tool_call" }>>();
   for (const item of items) if (item.type === "tool_call") latest.set(item.callId, item);
@@ -225,6 +234,27 @@ afterEach(() => {
   roots.clear();
 });
 
+async function waitForTimelineItem(
+  client: DaemonClient,
+  agentId: string,
+  predicate: (item: AgentTimelineItem) => boolean,
+): Promise<AgentTimelineItem> {
+  const deadline = Date.now() + 60_000;
+  let items: AgentTimelineItem[] = [];
+  while (Date.now() < deadline) {
+    items = await timeline(client, agentId);
+    const item = items.find(predicate);
+    if (item) return item;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`Timed out waiting for OMP timeline item: ${JSON.stringify(items)}`);
+}
+
+async function contextWindowUsedTokens(client: DaemonClient, agentId: string) {
+  const result = await client.fetchAgent(agentId);
+  return result?.agent.lastUsage?.contextWindowUsedTokens;
+}
+
 describe("daemon E2E (real OMP)", () => {
   test(
     "a prompt OMP rejects before its agent runs fails the turn with OMP's error",
@@ -242,6 +272,48 @@ describe("daemon E2E (real OMP)", () => {
         const finish = await harness.client.waitForFinish(agent.id, 60_000);
         expect(finish.status).toBe("error");
         expect(finish.error).toContain("No API key found for anthropic");
+      } finally {
+        await closeHarness(harness);
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "manual compact shows its progress and refreshes context usage",
+    async () => {
+      const harness = await createHarness();
+      try {
+        const agent = await createAgent(harness, "manual-compact");
+        await promptAndFinish(harness, agent.id, "Reply exactly: ready");
+        await promptAndFinish(
+          harness,
+          agent.id,
+          `${compactionFiller(2500)}\n\nWhich tea is in record 00007? Reply with one word.`,
+        );
+        await promptAndFinish(harness, agent.id, "Reply exactly: after-filler");
+        const usedBefore = await contextWindowUsedTokens(harness.client, agent.id);
+        expect(usedBefore).toBeGreaterThan(20_000);
+
+        await harness.client.sendMessage(agent.id, "/compact");
+        await waitForTimelineItem(
+          harness.client,
+          agent.id,
+          (item) => item.type === "compaction" && item.status === "completed",
+        );
+
+        expect(await timeline(harness.client, agent.id)).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ type: "compaction", status: "loading", trigger: "manual" }),
+            expect.objectContaining({ type: "compaction", status: "completed", trigger: "manual" }),
+          ]),
+        );
+        await harness.client.waitForAgentUpsert(
+          agent.id,
+          (snapshot) =>
+            (snapshot.lastUsage?.contextWindowUsedTokens ?? Infinity) < (usedBefore ?? 0),
+          60_000,
+        );
       } finally {
         await closeHarness(harness);
       }
@@ -504,6 +576,56 @@ describe("daemon E2E (real OMP)", () => {
             .replace(/\s/g, ""),
         ).toContain(`HOST_TOOL_OK:${agent.id}`);
       } finally {
+        await closeHarness(harness);
+      }
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "a compaction shows as a compaction row after a daemon restart",
+    async () => {
+      const harness = await createHarness();
+      let restarted: TestPaseoDaemon | null = null;
+      let restartedClient: DaemonClient | null = null;
+      try {
+        const agent = await createAgent(harness, "compact-restart");
+        await promptAndFinish(
+          harness,
+          agent.id,
+          `${compactionFiller()}\n\nReply exactly OMP_COMPACT_FIRST`,
+        );
+        await promptAndFinish(harness, agent.id, "Reply exactly OMP_COMPACT_SECOND");
+        await harness.client.sendMessage(agent.id, "/compact");
+        await harness.client.waitForFinish(agent.id, TIMEOUT_MS);
+        await promptAndFinish(harness, agent.id, "Reply exactly OMP_COMPACT_THIRD");
+
+        await harness.client.close();
+        await harness.daemon.close();
+        restarted = await createTestPaseoDaemon({
+          agentClients: createRealProviderClients(["omp"], pino({ level: "silent" })),
+          providerOverrides: { omp: { enabled: true } },
+          logger: pino({ level: "silent" }),
+          paseoHomeRoot: harness.paseoHomeRoot,
+          staticDir: harness.staticDir,
+          cleanup: false,
+        });
+        restartedClient = new DaemonClient({ url: `ws://127.0.0.1:${restarted.port}/ws` });
+        await restartedClient.connect();
+        await restartedClient.fetchAgents({ subscribe: {} });
+        const replayed = await timeline(restartedClient, agent.id);
+
+        expect(
+          latestTools(replayed)
+            .map(toolResult)
+            .filter((text) => text.includes("Unsupported history record")),
+        ).toEqual([]);
+        expect(replayed.filter((item) => item.type === "compaction")).toEqual([
+          expect.objectContaining({ type: "compaction", status: "completed" }),
+        ]);
+      } finally {
+        await restartedClient?.close().catch(() => undefined);
+        await restarted?.close().catch(() => undefined);
         await closeHarness(harness);
       }
     },

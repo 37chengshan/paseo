@@ -172,8 +172,9 @@ export class TerminalE2EHarness {
   }
 
   async closeOverlayAndFocusButtonBeforeRetry(page: Page): Promise<void> {
-    await page.clock.install();
-    await page.clock.pauseAt(new Date());
+    // Give the browser clock a fixed origin before pausing it in the future.
+    await page.clock.install({ time: new Date("2026-01-01T00:00:00Z") });
+    await page.clock.pauseAt(new Date("2026-01-01T00:01:00Z"));
     await page.keyboard.press("Escape");
     await expect(page.getByTestId("command-center-panel")).toBeHidden();
     await page.getByTestId("sidebar-search").focus();

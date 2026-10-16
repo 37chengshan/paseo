@@ -31,6 +31,7 @@ export const fr: TranslationResources = {
     back: "Retour",
     loading: "Chargement…",
     actions: {
+      save: "Enregistrer",
       back: "Retour",
       cancel: "Annuler",
       close: "Fermer",
@@ -125,6 +126,8 @@ export const fr: TranslationResources = {
     input: {
       accessibilityLabel: "Écrire à l’agent…",
       terminalAccessibilityLabel: "Prompt du terminal",
+      fullscreen: "Plein écran",
+      exitFullscreen: "Quitter le plein écran",
       focusHint: "{{shortcut}} pour saisir",
       addAttachment: "Ajouter une pièce jointe",
       interruptAgent: "Interrompre l’agent",
@@ -387,6 +390,9 @@ export const fr: TranslationResources = {
         completed: "Terminée",
       },
     },
+    turnFooter: {
+      workedFor: "A travaillé pendant {{duration}}",
+    },
     compaction: {
       loading: "Compaction…",
       auto: "Contexte compacté automatiquement",
@@ -612,6 +618,9 @@ export const fr: TranslationResources = {
       updateHost: "Mettez à jour l’hôte pour utiliser le rendu natif du terminal.",
       unableToSubscribe: "Impossible de s’abonner au terminal",
     },
+    sheet: {
+      openAsTab: "Ouvrir dans un onglet",
+    },
     tabs: {
       loading: "Chargement…",
       modified: "Modifications non enregistrées",
@@ -627,7 +636,7 @@ export const fr: TranslationResources = {
       },
       switcher: {
         trigger: "Changer d’onglet ({{count}} ouverts)",
-        title: "Changer d’onglet",
+        title: "Onglets de l’espace de travail",
         searchPlaceholder: "Rechercher des onglets",
       },
       menu: {
@@ -726,6 +735,8 @@ export const fr: TranslationResources = {
     header: {
       actions: {
         workspaceActions: "Actions de l’espace de travail",
+        workspaceActionsUnhealthy:
+          "Actions de l’espace de travail, un service est en mauvaise santé",
         newAgent: "Nouvel agent",
         newTerminal: "Nouveau terminal",
         newBrowser: "Nouvel onglet de navigateur",
@@ -774,6 +785,8 @@ export const fr: TranslationResources = {
         exitCode: "sortie {{code}}",
         startFailed: "Impossible de démarrer {{scriptName}}",
         stopFailed: "Impossible d’arrêter {{scriptName}}",
+        running: "En cours",
+        runningCount: "{{count}} en cours",
       },
     },
     tree: {
@@ -994,6 +1007,47 @@ export const fr: TranslationResources = {
         actions: {
           viewPullRequest: "Voir",
           openOn: "Ouvrir sur {{brand}}",
+          addToChat: "Ajouter à la conversation",
+          addAllToChat: "Tout ajouter à la conversation",
+          addingToChat: "Ajout…",
+        },
+        checksOverview: {
+          headline: {
+            actionRequired: "Certaines vérifications demandent votre attention",
+            failure: "Certaines vérifications ont échoué",
+            pending: "Certaines vérifications ne sont pas terminées",
+            success: "Toutes les vérifications ont réussi",
+            none: "Aucune vérification",
+          },
+          count: {
+            actionRequired: "{{count}} à traiter",
+            warning: "{{count}} avec avertissement",
+            failure: "{{count}} en échec",
+            pending: "{{count}} en cours",
+            manual: "{{count}} manuelle(s)",
+            success: "{{count}} réussie(s)",
+            ignored: "{{count}} ignorée(s)",
+          },
+          detailOne: "Vérification : {{parts}}",
+          detailMany: "Vérifications : {{parts}}",
+          groupOne: {
+            actionRequired: "{{count}} vérification à traiter",
+            warning: "{{count}} vérification avec avertissement",
+            failure: "{{count}} vérification en échec",
+            pending: "{{count}} vérification en cours",
+            manual: "{{count}} vérification manuelle",
+            success: "{{count}} vérification réussie",
+            ignored: "{{count}} vérification ignorée",
+          },
+          groupMany: {
+            actionRequired: "{{count}} vérifications à traiter",
+            warning: "{{count}} vérifications avec avertissement",
+            failure: "{{count}} vérifications en échec",
+            pending: "{{count}} vérifications en cours",
+            manual: "{{count}} vérifications manuelles",
+            success: "{{count}} vérifications réussies",
+            ignored: "{{count}} vérifications ignorées",
+          },
         },
         checksSummary: {
           passedLabel: "réussies",
@@ -1007,17 +1061,21 @@ export const fr: TranslationResources = {
           checks: "Vérifications",
           pipeline: "Pipeline",
           reviews: "Revues",
+          activity: "Activité",
         },
         empty: {
           noJobs: "Aucun job",
           loadingPipeline: "Chargement du pipeline…",
           pipelineJobsLoadFailed: "Impossible de charger les jobs du pipeline",
           allowedToFail: "échec autorisé",
+          noActivity: "Aucune activité pour le moment",
         },
         approvals: "{{given}} sur {{required}} approbations",
         accessibility: {
           pullRequest: "Pull request #{{number}}",
           pullRequest_mr: "Merge request !{{number}}",
+          commentActions: "Actions du commentaire",
+          threadActions: "Actions du fil",
           checkStatus: {
             passed: "Réussie",
             failed: "Échec",
@@ -1046,6 +1104,8 @@ export const fr: TranslationResources = {
         },
         thread: {
           discussion: "Fil de discussion",
+          resolved: "Résolu",
+          outdated: "Obsolète",
         },
         errors: {
           statusLoadFailed: "Impossible de charger le statut de la pull request",
@@ -1115,7 +1175,16 @@ export const fr: TranslationResources = {
     },
   },
   sidebar: {
+    statusGroupAccessibility: "Groupe {{label}}",
+    statusBucket: {
+      needsInput: "Attend une réponse",
+      failed: "Échec",
+      readyToReview: "À relire",
+      working: "En cours",
+      done: "Terminé",
+    },
     display: {
+      showBackground: "Afficher les espaces en arrière-plan",
       trigger: "Préférences d’affichage",
       heading: "Affichage",
       grouping: {
@@ -1634,13 +1703,18 @@ export const fr: TranslationResources = {
     title: "Ajouter un fournisseur",
     search: "Rechercher des fournisseurs",
     noProviders: "Aucun fournisseur trouvé",
+    clearSearch: "Effacer la recherche",
     actions: {
       add: "Ajouter",
+      addProvider: "Ajouter {{provider}}",
       adding: "Ajout…",
       installed: "Installé",
       cancel: "Annuler",
       installInstructions: "Instructions d’installation",
       installInstructionsFor: "Instructions d’installation de {{provider}}",
+    },
+    types: {
+      acp: "ACP",
     },
     errors: {
       unableToInstall: "Impossible d’installer le fournisseur",
@@ -1991,6 +2065,18 @@ export const fr: TranslationResources = {
     accessibility: "Fenêtre de contexte : {{percentage}} % utilisés",
   },
   review: {
+    feedback: {
+      send: "Envoyer les commentaires ({{count}})",
+      sending: "Envoi des commentaires ({{count}})",
+      chooseAgent: "Choisir un agent",
+      sent: "Commentaires envoyés à {{recipient}}",
+      "no-agents":
+        "Ouvrez un onglet d’agent dans cet espace de travail pour envoyer les commentaires.",
+      disconnected: "Connectez-vous à l’hôte pour envoyer les commentaires.",
+      "no-context": "Les commentaires enregistrés ne correspondent plus à ce diff.",
+      failed: "Échec de l’envoi des commentaires. Réessayez.",
+      prompt: "Veuillez traiter cette revue de code.",
+    },
     comment: {
       add: "Ajouter un commentaire de revue",
       edit: "Modifier le commentaire de revue",
