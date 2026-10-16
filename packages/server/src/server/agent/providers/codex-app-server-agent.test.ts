@@ -7073,3 +7073,74 @@ describe("Codex denied plan approvals", () => {
     });
   });
 });
+
+test.each([
+  { statuses: ["completed"], expected: ["completed"] },
+  { statuses: ["completed", "inProgress"], expected: ["completed", "running"] },
+  { statuses: ["inProgress", "completed"], expected: ["running", "completed"] },
+])(
+  "restores each native child status without settling a running sibling: $statuses",
+  async ({ statuses, expected }) => {
+    const ids = statuses.map((_, i) => `child-${i}`);
+    const app = createFakeCodexAppServer({
+      "thread/read": (params) => {
+        const id = (params as { threadId: string }).threadId;
+        if (id !== "parent")
+          return { thread: { turns: [{ status: statuses[ids.indexOf(id)], items: [] }] } };
+        return {
+          thread: {
+            turns: [
+              {
+                status: "completed",
+                items: [
+                  {
+                    type: "collabAgentToolCall",
+                    id: "shared-spawn",
+                    tool: "spawnAgent",
+                    status: "completed",
+                    receiverThreadIds: ids,
+                    agentsStates: Object.fromEntries(
+                      ids.map((childId) => [childId, { status: "running" }]),
+                    ),
+                  },
+                ],
+              },
+            ],
+          },
+        };
+      },
+    });
+    const session = new CodexAppServerAgentSession(
+      { provider: "codex", cwd: process.cwd(), modeId: "full-access" },
+      { sessionId: "parent" },
+      createTestLogger(),
+      async () => app.child,
+      {},
+      false,
+      false,
+      false,
+      undefined,
+      "history",
+    );
+    try {
+      await session.connect();
+      const statusesById = new Map<string, string | undefined>();
+      let parentStatus: string | undefined;
+      for await (const event of session.streamHistory()) {
+        if (
+          event.type === "timeline" &&
+          event.item.type === "tool_call" &&
+          event.item.callId === "shared-spawn"
+        )
+          parentStatus = event.item.status;
+        if (event.type === "provider_subagent" && event.event.type === "upsert")
+          statusesById.set(event.event.id, event.event.status);
+      }
+      expect(ids.map((id) => statusesById.get(id))).toEqual(expected);
+      expect(parentStatus).toBe(expected.includes("running") ? "running" : "completed");
+    } finally {
+      await session.close();
+    }
+    app.assertNoErrors();
+  },
+);
