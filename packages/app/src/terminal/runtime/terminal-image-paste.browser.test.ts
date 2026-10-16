@@ -11,7 +11,13 @@ function mountTerminal() {
   root.append(host);
   document.body.append(root);
   const runtime = new TerminalEmulatorRuntime({ isMac: false });
-  runtime.setCallbacks({ callbacks: { onInput: (data) => inputs.push(data) } });
+  runtime.setCallbacks({
+    callbacks: {
+      onInput: (data) => {
+        inputs.push(data);
+      },
+    },
+  });
   runtime.mount({ root, host, initialSnapshot: null, scrollback: 1000, theme: {} });
   return {
     inputs,
