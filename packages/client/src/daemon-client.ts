@@ -3212,8 +3212,11 @@ export class DaemonClient {
 
   async importAgent(input: ImportAgentInput): Promise<AgentSnapshotPayload> {
     // COMPAT(importSessionMode): added after v0.11.4, remove gate after 2027-04-16.
-    if (input.modeId && this.lastServerInfoMessage?.features?.importSessionMode !== true) {
-      throw new Error("Update the host to select a mode when importing an agent.");
+    if (input.modeId) {
+      await this.whenConnected();
+      if (this.lastServerInfoMessage?.features?.importSessionMode !== true) {
+        throw new Error("Update the host to select a mode when importing an agent.");
+      }
     }
     const requestId = this.createRequestId();
     const message = SessionInboundMessageSchema.parse({
