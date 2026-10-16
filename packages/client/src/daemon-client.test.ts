@@ -5381,7 +5381,39 @@ test("fetches scoped recent provider sessions", async () => {
   });
 });
 
-test("imports an agent by provider handle id", async () => {
+test.each([undefined, false])(
+  "rejects explicit import modes on hosts without support (%s)",
+  async (supported) => {
+    const transport = createMockTransport();
+    const client = new DaemonClient({
+      url: "ws://test",
+      clientId: "clsk_import_mode_compat",
+      logger: createMockLogger(),
+      reconnect: { enabled: false },
+      transportFactory: () => transport.transport,
+    });
+    clients.push(client);
+    const connecting = client.connect();
+    transport.triggerOpen({ features: { importSessionMode: supported } });
+    await connecting;
+
+    const importing = client.importAgent({
+      provider: "claude",
+      sessionId: "native-session",
+      modeId: "auto",
+    });
+    void importing.catch(() => undefined);
+    expect(transport.sent).toHaveLength(0);
+    await expect(importing).rejects.toThrow(
+      "Update the host to select a mode when importing an agent.",
+    );
+  },
+);
+
+test.each([
+  ["full-access", true],
+  [undefined, undefined],
+] as const)("imports an agent by provider handle id with mode %s", async (modeId, supported) => {
   const logger = createMockLogger();
   const mock = createMockTransport();
 
@@ -5395,14 +5427,14 @@ test("imports an agent by provider handle id", async () => {
   clients.push(client);
 
   const connectPromise = client.connect();
-  mock.triggerOpen();
+  mock.triggerOpen({ features: { importSessionMode: supported } });
   await connectPromise;
 
   const promise = client.importAgent({
     providerId: "custom-codex",
     providerHandleId: "thread-1",
     cwd: "/tmp/repo",
-    modeId: "full-access",
+    modeId,
   });
 
   expect(mock.sent).toHaveLength(1);
@@ -5423,8 +5455,8 @@ test("imports an agent by provider handle id", async () => {
     providerId: "custom-codex",
     providerHandleId: "thread-1",
     cwd: "/tmp/repo",
-    modeId: "full-access",
   });
+  expect(request.message.modeId).toBe(modeId);
   expect(request.message).not.toHaveProperty("sessionId");
 
   mock.triggerMessage(
