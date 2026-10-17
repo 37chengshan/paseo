@@ -1,16 +1,13 @@
-// Select a shell terminal in the Android app, loaded from the checkout under test.
-// node packages/app/e2e/mobile/terminal-input/hardware-enter.android.mjs <session> <serial> <daemon-home> <terminal-id>
-// Requires a local daemon, Node.js in the terminal, and agent-device with the real IME.
+// Open the Android app from this checkout with agent-device and focus a shell terminal.
+// node packages/app/e2e/mobile/terminal-input/hardware-enter.android.mjs <serial> <daemon-home> <terminal-id>
+// Requires a local daemon, Node.js in the terminal, and the native terminal input focused.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
-const [, , session, serial, home, terminalId] = process.argv;
-assert(
-  session && serial && home && terminalId,
-  "Pass session, adb serial, daemon home, terminal ID",
-);
+const [, , serial, home, terminalId] = process.argv;
+assert(serial && home && terminalId, "Pass adb serial, daemon home, terminal ID");
 const cli = fileURLToPath(new URL("../../../../cli/dist/index.js", import.meta.url));
 function terminal(...args) {
   return execFileSync(process.execPath, [cli, "--home", home, "terminal", ...args], {
@@ -52,10 +49,6 @@ for (const enter of ["KEYCODE_ENTER", "KEYCODE_NUMPAD_ENTER"]) {
   terminal("send-keys", terminalId, "Enter");
   try {
     await waitForLine("READY");
-    execFileSync("agent-device", ["--session", session, "press", 'id="terminal-surface"'], {
-      encoding: "utf8",
-      timeout: 30_000,
-    });
     key(enter);
     await waitForLine("HEX:0d");
     // The second event is native key-up, so allow it to arrive before the assertion.
@@ -67,6 +60,10 @@ for (const enter of ["KEYCODE_ENTER", "KEYCODE_NUMPAD_ENTER"]) {
   } catch (error) {
     failures.push(error);
     console.error(error.message);
+    console.error(
+      "Observed:",
+      capture().filter((line) => line.startsWith("HEX:")),
+    );
   } finally {
     terminal("send-keys", terminalId, "C-c");
     await delay(300);
