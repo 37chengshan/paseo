@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { TestInfo } from "@playwright/test";
 import { expect, test, type Page } from "../support/fixtures";
 import {
@@ -11,6 +12,8 @@ import {
   expectReconnectingToastVisible,
 } from "../support/helpers/workspace-ui";
 import { trackPromptJumpRequests } from "../support/helpers/agent-timeline-gate";
+import { seedWorkspace } from "../support/helpers/seed-client";
+import { connectNewWorkspaceDaemonClient } from "../support/helpers/new-workspace";
 import {
   composerLocator,
   fillComposerDraft,
@@ -24,11 +27,13 @@ const MAC_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
 const FILLER = Array.from({ length: 400 }, (_, index) => `filler${index}`).join(" ");
-const STREAMED_RESPONSE = [
+const STREAMED_TAIL = "STREAMED-REPLY-FINAL-TAIL";
+const HYDRATED_PARTIAL = "Hydrated partial continuation";
+const STREAMED_PREFIX = [
   "First paragraph with alpha-needle and pair-needle inside.",
   "Second paragraph with beta-needle and pair-needle inside.",
   `Third paragraph ${FILLER}`,
-].join("\n\n");
+].map((paragraph) => `${paragraph}\n\n`);
 
 const RESPONSE =
   'İ😀hello **world**; hello *world*.\n\n[hello &amp; world](https://example.com/hidden-destination)\n\n```ts\nconst a = "a.b";\n```\n\n- first cell\n- second cell';
@@ -282,50 +287,97 @@ test("shows a disconnected search failure and recovers with Retry", async ({ pag
   }
 });
 
-interface StreamedReplyChat extends MockAgentWorkspace {
-  /** Resolves once the streamed reply has finished arriving. */
+interface StreamedReplyChat {
+  cleanup(): Promise<void>;
+  advancePastVisiblePrefix(): Promise<void>;
+  expectHydratedPartial(): Promise<void>;
   replyFinished(): Promise<void>;
 }
 
-/**
- * Opens the chat first, then streams a multi-block reply into it and waits for a
- * later block, so the block holding the early needles is no longer the growing row.
- */
+/** The provider owns the pause, so both search and hydration see incomplete output. */
 async function openChatStreamingMultiBlockReply(page: Page): Promise<StreamedReplyChat> {
-  const agent = await seedMockAgentWorkspace({
-    repoPrefix: "chat-find-live-blocks-",
-    title: "Chat Find live blocks",
-    featureValues: {
-      mockStreamingAssistantResponse: STREAMED_RESPONSE,
-      mockStreamingAssistantIntervalMs: 60,
-    },
-  });
+  const workspace = await seedWorkspace({ repoPrefix: "chat-find-live-blocks-" });
+  const plugins = await connectNewWorkspaceDaemonClient();
+  const previous = await plugins.getDaemonConfig();
+  const gate = await installDaemonWebSocketGate(page);
+  const append = (chunks: string[], finish = false) =>
+    plugins.invokePluginRpc("controlled-stream-test", "append", { chunks, finish });
+  let started = false;
+  const cleanup = async () => {
+    try {
+      if (started) await append([], true);
+      await plugins.removePlugin("controlled-stream-test");
+      await plugins.patchDaemonConfig({ pluginsEnabled: previous.config.pluginsEnabled });
+    } finally {
+      await plugins.close();
+      await workspace.cleanup();
+    }
+  };
   try {
-    await openAgentRoute(page, agent);
-    await agent.client.sendAgentMessage(agent.agentId, "Stream a multi block answer");
-    await expect(page.getByText("beta-needle", { exact: false }).last()).toBeVisible({
-      timeout: 30_000,
+    await plugins.patchDaemonConfig({ pluginsEnabled: true });
+    await plugins.installDirectoryPlugin(
+      path.resolve(__dirname, "../support/fixtures/controlled-stream-plugin"),
+    );
+    const agent = await workspace.client.createAgent({
+      provider: "controlled-stream",
+      cwd: workspace.repoPath,
+      workspaceId: workspace.workspaceId,
+      title: "Chat Find live blocks",
     });
+    await openAgentRoute(page, { workspaceId: workspace.workspaceId, agentId: agent.id });
+    await workspace.client.sendAgentMessage(agent.id, "Stream a multi block answer");
+    started = true;
+    await append(STREAMED_PREFIX);
+    await expect(page.getByText("beta-needle", { exact: false }).last()).toBeVisible();
     return {
-      ...agent,
+      cleanup,
+      advancePastVisiblePrefix: async () => {
+        const count = gate.getAgentStreamItemCount("assistant_message");
+        gate.setAgentStreamSuppressed(true);
+        await append([HYDRATED_PARTIAL]);
+        await gate.waitForAgentStreamItem("assistant_message", count + 1);
+        await expect(page.getByTestId("assistant-message").last()).not.toContainText(
+          HYDRATED_PARTIAL,
+        );
+      },
+      expectHydratedPartial: async () => {
+        // A newer daemon row forces Find to fetch the real timeline instead of
+        // matching only the browser's streamed prefix.
+        await expect(page.getByTestId("assistant-message").last()).toContainText(HYDRATED_PARTIAL);
+        expect(gate.getTimelineRequestCount("before", agent.id)).toBeGreaterThan(0);
+      },
       replyFinished: async () => {
-        await agent.client.waitForFinish(agent.agentId, 60_000);
+        gate.setAgentStreamSuppressed(false);
+        await append([`\n\n${STREAMED_TAIL}`], true);
+        await workspace.client.waitForFinish(agent.id, 15_000);
       },
     };
   } catch (error) {
-    await agent.cleanup();
+    await cleanup();
     throw error;
   }
+}
+
+async function expectIncompleteStreamedReply(page: Page): Promise<void> {
+  await expect(page.getByTestId("assistant-message").last()).toContainText("beta-needle");
+  await expect(page.getByTestId("assistant-message").last()).toContainText("filler399");
+  await expect(page.getByTestId("assistant-message").last()).not.toContainText(STREAMED_TAIL);
+  await expect(page.getByRole("button", { name: "Stop agent", exact: true })).toBeVisible();
 }
 
 test("finds a hit in a message that streamed while the chat was open", async ({ page }) => {
   test.setTimeout(120_000);
   const chat = await openChatStreamingMultiBlockReply(page);
   try {
+    await expectIncompleteStreamedReply(page);
+    await chat.advancePastVisiblePrefix();
     await openChatFind(page);
     // The first-paragraph hit must remain searchable while the same message grows.
     await expectFindStatus(page, "alpha-needle", "1 of 1");
+    await chat.expectHydratedPartial();
+    await expectIncompleteStreamedReply(page);
     await chat.replyFinished();
+    await expect(page.getByTestId("assistant-message").last()).toContainText(STREAMED_TAIL);
     await expectFindStatus(page, "beta-needle", "1 of 1");
     // One message, two paragraphs, one count across both.
     await expectFindStatus(page, "pair-needle", "1 of 2");

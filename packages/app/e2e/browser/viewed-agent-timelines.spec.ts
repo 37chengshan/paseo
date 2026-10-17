@@ -306,13 +306,17 @@ test.describe("Viewed agent timelines", () => {
   }) => {
     test.setTimeout(150_000);
     const subscriptions = observeTimelineSubscriptions(page);
-    const scenario = await seedViewedTimelineScenario({ firstAgentModel: "one-minute-stream" });
+    const scenario = await seedViewedTimelineScenario({ firstAgentModel: "ten-second-stream" });
     try {
       await openAgent(page, scenario, scenario.firstAgentId);
       await startVisibleTurn(page, scenario, "Finish after this chat becomes hidden.");
       await selectAgent(page, "Second viewed chat");
       await subscriptions.waitForSubscribedAgents([scenario.firstAgentId, scenario.secondAgentId]);
-      const finish = await scenario.client.waitForFinish(scenario.firstAgentId, 90_000);
+      const agents = await scenario.client.fetchAgents();
+      expect(
+        agents.entries.find((entry) => entry.agent.id === scenario.firstAgentId)?.agent.status,
+      ).toBe("running");
+      const finish = await scenario.client.waitForFinish(scenario.firstAgentId, 30_000);
       expect(finish.status).toBe("idle");
 
       await selectAgent(page, "First viewed chat");
