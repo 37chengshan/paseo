@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { fileURLToPath } from "node:url";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, appendFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPiExtensionHost } from "../index.js";
@@ -792,7 +792,7 @@ describe("pi-subagents adapter", () => {
 
       expect(
         subagentUpserts(received).filter((event) => event.id === "call-wf:alpha" && event.status),
-      ).toEqual([]);
+      ).toEqual([expect.objectContaining({ id: "call-wf:alpha", status: "completed" })]);
       // The child that never reported a verdict of its own is still settled by that tick.
       expect(
         subagentUpserts(received).findLast((event) => event.id === "call-wf:beta")?.status,
@@ -982,7 +982,13 @@ describe("pi-subagents adapter", () => {
       const alphaUpserts = () =>
         subagentUpserts(received).filter((event) => event.id === "call-wf:alpha");
       expect(alphaUpserts()).toEqual([
-        { type: "upsert", id: "call-wf:alpha", title: "scout", liveness: "poll" },
+        {
+          type: "upsert",
+          id: "call-wf:alpha",
+          title: "scout",
+          status: "completed",
+          liveness: "poll",
+        },
       ]);
 
       // Reported once, not on every tick.
@@ -1030,5 +1036,116 @@ describe("pi-subagents adapter", () => {
       expect.objectContaining({ id: "fanout:alpha", title: "scout", status: "completed" }),
       expect.objectContaining({ id: "fanout:beta", title: "reviewer", status: "completed" }),
     ]);
+  });
+  test("replays keyed async workflow child transcripts without a live poll", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "paseo-pi-workflow-replay-"));
+    const host = createPiExtensionHost();
+    try {
+      const sessionFile = join(dir, "child.jsonl");
+      await writeFile(
+        sessionFile,
+        JSON.stringify({
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Saved reviewer answer" }],
+          },
+        }) + "\n",
+      );
+      await writeFile(
+        join(dir, "status.json"),
+        JSON.stringify({
+          state: "complete",
+          steps: [{ agent: "reviewer", workflowKey: "review", status: "complete", sessionFile }],
+        }),
+      );
+      const output = host.mapToolCall({
+        callId: "replayed-workflow",
+        toolName: "subagent",
+        args: { workflowScript: "return await runs.all(items);", async: true },
+        status: "completed",
+        result: {
+          details: {
+            mode: "workflow",
+            runId: "saved-run",
+            asyncId: "saved-run",
+            asyncDir: dir,
+            results: [],
+          },
+        },
+      });
+      const events = await output!.hydration;
+      expect(
+        events.some(
+          (event) =>
+            event.type === "provider_subagent" &&
+            event.event.type === "timeline" &&
+            event.event.id === "replayed-workflow:review",
+        ),
+      ).toBe(true);
+    } finally {
+      host.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("stops following a child whose completion arrived before its transcript was attached", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "paseo-pi-finished-reader-"));
+    const host = createPiExtensionHost();
+    const received: AgentStreamEvent[] = [];
+    try {
+      const sessionFile = join(dir, "child.jsonl");
+      const message = (text: string) =>
+        JSON.stringify({
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text }],
+          },
+        }) + "\n";
+      await writeFile(sessionFile, message("Finished child"));
+      host.follow((event) => received.push(event));
+      const spawn = host.mapToolCall({
+        callId: "fast-workflow",
+        toolName: "subagent",
+        args: { workflow: true, async: true },
+        status: "completed",
+        result: {
+          details: {
+            mode: "workflow",
+            runId: "fast-run",
+            asyncId: "fast-run",
+            asyncDir: dir,
+            results: [],
+          },
+        },
+      });
+      await spawn!.hydration;
+      const notice = host.mapCustomMessage({
+        role: "custom",
+        customType: "subagent-incremental-child-notify",
+        content: "Workflow child completed: **review**\nWorkflow run: fast-run",
+      });
+      await notice!.hydration;
+      await writeFile(
+        join(dir, "status.json"),
+        JSON.stringify({
+          state: "running",
+          steps: [{ agent: "reviewer", workflowKey: "review", status: "running", sessionFile }],
+        }),
+      );
+      await expect.poll(() => hasChildTimeline(received)).toBe(true);
+      const timelineCount = () =>
+        received.filter(
+          (event) => event.type === "provider_subagent" && event.event.type === "timeline",
+        ).length;
+      const count = timelineCount();
+      await appendFile(sessionFile, message("Later content must not be followed"));
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(timelineCount()).toBe(count);
+    } finally {
+      host.close();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

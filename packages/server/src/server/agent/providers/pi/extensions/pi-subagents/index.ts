@@ -177,11 +177,11 @@ export const piSubagents: PiExtension = {
     const callsByRun = new Map<string, string>();
     const readSessions = new Set<string>();
     /** Rows already reported terminal; a late give-up must not rewrite one of them. */
-    const settledRows = new Set<string>();
+    const settledRows = new Map<string, NonNullable<SubagentUpsert["status"]>>();
     /** Rows whose poll already reported the step's agent. A settled row is still named once. */
     const namedRows = new Set<string>();
-    const recordTerminal = (id: string, status: string) => {
-      if (status !== "running") settledRows.add(id);
+    const recordTerminal = (id: string, status: NonNullable<SubagentUpsert["status"]>) => {
+      if (status !== "running") settledRows.set(id, status);
     };
     /** Keyed by async directory, which both status.json and the completion notice carry. */
     const asyncRuns = new Map<string, AsyncRun>();
@@ -281,6 +281,66 @@ export const piSubagents: PiExtension = {
       }
       return subagents.length ? { subagents, childSessions } : undefined;
     };
+    /** Project a saved status both when replaying a launch and when its live poll advances. */
+    const projectAsyncStatus = (run: AsyncRun, status: z.infer<typeof AsyncStatus>) => {
+      const subagents: NonNullable<PiExtensionToolMapping["subagents"]> = [];
+      const childSessions: NonNullable<PiExtensionToolMapping["childSessions"]> = [];
+      const runTerminal = TERMINAL_RUN_STATES.has(status.state);
+      for (const [index, step] of status.steps.entries()) {
+        const id = rowId(run.owner, status.steps.length, step.workflowKey, index);
+        run.rows.add(id);
+        // A child's notice supplies its verdict even when its saved status is stale. Reuse that
+        // verdict when attaching a transcript or filling its name after the notice arrived.
+        const settledStatus = settledRows.get(id);
+        const childSession =
+          step.sessionFile && !readSessions.has(step.sessionFile)
+            ? { id, file: step.sessionFile }
+            : undefined;
+        if (!settledStatus) {
+          const childStatus = asyncChildStatus(status.state, step.status);
+          recordTerminal(id, childStatus);
+          namedRows.add(id);
+          subagents.push({
+            type: "upsert",
+            id,
+            title: step.agent,
+            status: childStatus,
+            liveness: "poll" as const,
+          });
+        } else if (!namedRows.has(id) || childSession) {
+          // Attach a late transcript with its known verdict, so the host reads it once instead of
+          // starting a follower that no later terminal update will release.
+          namedRows.add(id);
+          subagents.push({
+            type: "upsert",
+            id,
+            title: step.agent,
+            status: settledStatus,
+            liveness: "poll" as const,
+          });
+        }
+        if (childSession) {
+          readSessions.add(childSession.file);
+          childSessions.push(childSession);
+        }
+      }
+      if (runTerminal) run.polling = false;
+      // The launch row stands for the whole run, and a single unnamed child already took its
+      // id. Re-reporting it every tick is also what proves to the manager that this run is alive.
+      // A row that already settled keeps that verdict: a result that landed before the run's
+      // steps named its children must not be reverted to running by the next tick.
+      if (!run.rows.has(run.owner) && !settledRows.has(run.owner)) {
+        const ownerStatus = run.polling ? ("running" as const) : asyncRunStatus(status.state);
+        recordTerminal(run.owner, ownerStatus);
+        subagents.push({
+          type: "upsert",
+          id: run.owner,
+          status: ownerStatus,
+          liveness: "poll",
+        });
+      }
+      return { subagents, childSessions };
+    };
     /** A settled spawn: Pi either reports the rows it ran, or an async directory the poll follows. */
     const mapSettledSpawn = (
       call: PiExtensionToolCall,
@@ -310,6 +370,10 @@ export const piSubagents: PiExtension = {
         }
         // The placeholder row is now backed by a per-tick poll, which is what proves it alive.
         rememberAsyncRun(details.data, call);
+        const dir = details.data.asyncDir;
+        const run = dir ? asyncRuns.get(dir) : undefined;
+        const status = dir ? readAsyncStatus(dir) : undefined;
+        if (run && status) return projectAsyncStatus(run, status);
         return { subagents: [{ ...base, status: "running" as const, liveness: "poll" as const }] };
       }
       const collected = collectRows(call.callId, details.data.results, description, failed);
@@ -437,51 +501,9 @@ export const piSubagents: PiExtension = {
             continue;
           }
           run.misses = 0;
-          const runTerminal = TERMINAL_RUN_STATES.has(status.state);
-          for (const [index, step] of status.steps.entries()) {
-            const id = rowId(run.owner, status.steps.length, step.workflowKey, index);
-            run.rows.add(id);
-            // A child notice is this child's verdict, so a settled row gets no further status write
-            // from the poll. While the run is going, a stale step entry must not revert it to
-            // running; on the terminal tick, the run's own outcome must not overwrite it.
-            if (!settledRows.has(id)) {
-              const childStatus = asyncChildStatus(status.state, step.status);
-              recordTerminal(id, childStatus);
-              namedRows.add(id);
-              subagents.push({
-                type: "upsert",
-                id,
-                title: step.agent,
-                status: childStatus,
-                liveness: "poll" as const,
-              });
-            } else if (!namedRows.has(id)) {
-              // A child notice can settle a row before any poll saw it, and that notice carries no
-              // agent name. Omit `status`: the store keeps the settled verdict and only takes the
-              // title the run's status file names.
-              namedRows.add(id);
-              subagents.push({ type: "upsert", id, title: step.agent, liveness: "poll" as const });
-            }
-            if (step.sessionFile && !readSessions.has(step.sessionFile)) {
-              readSessions.add(step.sessionFile);
-              childSessions.push({ id, file: step.sessionFile });
-            }
-          }
-          if (runTerminal) run.polling = false;
-          // The launch row stands for the whole run, and a single unnamed child already took its
-          // id. Re-reporting it every tick is also what proves to the manager that this run is alive.
-          // A row that already settled keeps that verdict: a result that landed before the run's
-          // steps named its children must not be reverted to running by the next tick.
-          if (!run.rows.has(run.owner) && !settledRows.has(run.owner)) {
-            const ownerStatus = run.polling ? ("running" as const) : asyncRunStatus(status.state);
-            recordTerminal(run.owner, ownerStatus);
-            subagents.push({
-              type: "upsert",
-              id: run.owner,
-              status: ownerStatus,
-              liveness: "poll",
-            });
-          }
+          const output = projectAsyncStatus(run, status);
+          subagents.push(...output.subagents);
+          childSessions.push(...output.childSessions);
         }
         return subagents.length || childSessions.length ? { subagents, childSessions } : undefined;
       },
