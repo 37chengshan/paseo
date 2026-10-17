@@ -477,59 +477,49 @@ for (const shape of ["seven-day-only", "Spark"] as const) {
   });
 }
 
-for (const [size, viewport] of Object.entries({
-  desktop: { width: 1440, height: 900 },
-  compact: { width: 390, height: 844 },
-})) {
-  test(`Usage Settings cog ${size} in both themes`, async ({ page }, testInfo) => {
-    test.setTimeout(120_000);
-    await page.addInitScript(() => {
-      const key = "@paseo:app-settings";
-      const current = JSON.parse(localStorage.getItem(key) ?? "{}");
-      localStorage.setItem(key, JSON.stringify({ ...current, theme: "auto" }));
-    });
-    await page.emulateMedia({ colorScheme: "light" });
-    const usage = await installUsageReportsFixture(page, {
-      lists: [() => claudeAndCodexReports()],
-    });
-    await page.setViewportSize(viewport);
-    await gotoAppShell(page);
-    if (size === "compact") await openCompactSidebar(page);
-    await openUsageFromIcon(page);
-    const screen = page.getByTestId(`usage-host-${getServerId()}`);
-    await expect(screen.getByText("Claude", { exact: true })).toBeVisible({ timeout: 30_000 });
-
-    for (const theme of ["light", "dark"] as const) {
-      await test.step(`the cog and its settings work in ${theme}`, async () => {
-        await page.emulateMedia({ colorScheme: theme });
-        const settings = page.getByTestId("usage-options-menu");
-        await expect(settings).toHaveAccessibleName("Settings");
-        await expect(page.getByTestId("usage-display-used")).toHaveCount(0);
-        await captureSettingsState(page, testInfo, `${size}-${theme}-cog`);
-
-        await openUsageOptions(page);
-        await expectUsageOptionsFitContent(page);
-        await expect(page.getByText("Pinned windows show in the sidebar footer")).toBeVisible();
-        await expect(page.getByTestId("usage-display-used")).toHaveAttribute(
-          "aria-selected",
-          "true",
-        );
-        await captureSettingsState(page, testInfo, `${size}-${theme}-settings`);
-        await showUsageAs(page, "remaining");
-        await expect(screen.getByText("69% left")).toBeVisible();
-        await showUsageAs(page, "used");
-        await expect(pinRow(screen, "Claude", "Session")).toHaveAccessibleName(
-          /^Pin Claude Session, 31% · resets /,
-        );
-        await openUsageOptions(page);
-        await closeUsageOptions(page);
+for (const theme of ["light", "dark"] as const) {
+  for (const [size, viewport] of Object.entries({
+    desktop: { width: 1440, height: 900 },
+    compact: { width: 390, height: 844 },
+  })) {
+    test(`Usage Settings cog ${size} ${theme}`, async ({ page }, testInfo) => {
+      test.setTimeout(120_000);
+      await page.addInitScript((value) => {
+        const key = "@paseo:app-settings";
+        const current = JSON.parse(localStorage.getItem(key) ?? "{}");
+        localStorage.setItem(key, JSON.stringify({ ...current, theme: value }));
+      }, theme);
+      const usage = await installUsageReportsFixture(page, {
+        lists: [() => claudeAndCodexReports()],
       });
-    }
-    await test.step("refresh still works after changing the display settings", async () => {
+      await page.setViewportSize(viewport);
+      await gotoAppShell(page);
+      if (size === "compact") await openCompactSidebar(page);
+      await openUsageFromIcon(page);
+      const screen = page.getByTestId(`usage-host-${getServerId()}`);
+      await expect(screen.getByText("Claude", { exact: true })).toBeVisible({ timeout: 30_000 });
+      const settings = page.getByTestId("usage-options-menu");
+      await expect(settings).toHaveAccessibleName("Settings");
+      await expect(page.getByTestId("usage-display-used")).toHaveCount(0);
+      await captureSettingsState(page, testInfo, `${size}-${theme}-cog`);
+
+      await openUsageOptions(page);
+      await expectUsageOptionsFitContent(page);
+      await expect(page.getByText("Pinned windows show in the sidebar footer")).toBeVisible();
+      await expect(page.getByTestId("usage-display-used")).toHaveAttribute("aria-selected", "true");
+      await captureSettingsState(page, testInfo, `${size}-${theme}-settings`);
+      await showUsageAs(page, "remaining");
+      await expect(screen.getByText("69% left")).toBeVisible();
+      await showUsageAs(page, "used");
+      await expect(pinRow(screen, "Claude", "Session")).toHaveAccessibleName(
+        /^Pin Claude Session, 31% · resets /,
+      );
+      await openUsageOptions(page);
+      await closeUsageOptions(page);
       await refreshAllUsage(page);
       await expect.poll(() => forcedRefreshes(usage)).toEqual([{ forceRefresh: true }]);
     });
-  });
+  }
 }
 
 async function captureSettingsState(

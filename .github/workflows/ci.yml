@@ -407,7 +407,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           # Balance contiguous file groups using CI durations and the trimmed
           # inventory. Required check names and worker counts stay unchanged.
-          PWTEST_SHARD_WEIGHTS: "183:185:181:202"
+          PWTEST_SHARD_WEIGHTS: "187:183:184:201"
 
       - name: Upload test artifacts
         uses: actions/upload-artifact@v4
