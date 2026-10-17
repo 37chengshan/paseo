@@ -595,6 +595,84 @@ function createSqliteCache() {
 }
 
 describe("SQLite baseline restoration", () => {
+  it("does not duplicate a conversation restored from display-only SQLite history", async () => {
+    useSessionStore.getState().initializeSession(SERVER_ID, null);
+    const { cache, database } = createSqliteCache();
+    cache.setHosts([SERVER_ID]);
+    const timestamp = new Date("2026-08-26T10:00:00.000Z");
+    cache.commitTimeline(SERVER_ID, AGENT_ID, {
+      agentId: AGENT_ID,
+      items: [
+        { kind: "user_message", id: "prompt", messageId: "prompt", text: "Say BASS_OK", timestamp },
+        { kind: "assistant_message", id: "reply", text: "BASS_OK", timestamp },
+      ],
+      range: null,
+      hasOlder: false,
+    });
+    await cache.flush();
+    const owner = createOwner(cache);
+    try {
+      owner.replaceVisibleAgentIds("test", [AGENT_ID]);
+      await expect
+        .poll(
+          () =>
+            selectAgentTimelineState(useSessionStore.getState().sessions[SERVER_ID], AGENT_ID)
+              .status,
+        )
+        .toBe("painted");
+      owner.applyTimelineResponse({
+        requestId: "reopened-tail",
+        agentId: AGENT_ID,
+        agent: null,
+        direction: "tail",
+        projection: "projected",
+        reset: false,
+        epoch: "new-epoch",
+        window: { minSeq: 1, maxSeq: 2, nextSeq: 3 },
+        startCursor: { epoch: "new-epoch", seq: 1 },
+        endCursor: { epoch: "new-epoch", seq: 2 },
+        entries: [
+          {
+            provider: "test",
+            item: { type: "user_message", messageId: "prompt", text: "Say BASS_OK" },
+            timestamp: timestamp.toISOString(),
+            seqStart: 1,
+            seqEnd: 1,
+            sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }],
+            collapsed: [],
+          },
+          {
+            provider: "test",
+            item: { type: "assistant_message", messageId: "reply", text: "BASS_OK" },
+            timestamp: timestamp.toISOString(),
+            seqStart: 2,
+            seqEnd: 2,
+            sourceSeqRanges: [{ startSeq: 2, endSeq: 2 }],
+            collapsed: [],
+          },
+        ],
+        error: null,
+        hasNewer: false,
+        hasOlder: false,
+        staleCursor: false,
+        gap: false,
+      });
+      const timeline = selectAgentTimelineState(
+        useSessionStore.getState().sessions[SERVER_ID],
+        AGENT_ID,
+      );
+      expect(timeline).toMatchObject({
+        status: "synced",
+        items: [
+          { kind: "user_message", text: "Say BASS_OK" },
+          { kind: "assistant_message", text: "BASS_OK" },
+        ],
+      });
+    } finally {
+      owner.dispose();
+      database.close();
+    }
+  });
   it.each([false, true])(
     "keeps display-only cached history under a live event (synced=%s)",
     async (synced) => {
