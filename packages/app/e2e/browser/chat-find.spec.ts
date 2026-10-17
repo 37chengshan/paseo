@@ -1,4 +1,3 @@
-import path from "node:path";
 import type { TestInfo } from "@playwright/test";
 import { expect, test, type Page } from "../support/fixtures";
 import {
@@ -13,7 +12,7 @@ import {
 } from "../support/helpers/workspace-ui";
 import { trackPromptJumpRequests } from "../support/helpers/agent-timeline-gate";
 import { seedWorkspace } from "../support/helpers/seed-client";
-import { connectNewWorkspaceDaemonClient } from "../support/helpers/new-workspace";
+import { createControlledStream } from "../support/helpers/controlled-stream";
 import {
   composerLocator,
   fillComposerDraft,
@@ -296,45 +295,38 @@ interface StreamedReplyChat {
 
 /** The provider owns the pause, so both search and hydration see incomplete output. */
 async function openChatStreamingMultiBlockReply(page: Page): Promise<StreamedReplyChat> {
-  const workspace = await seedWorkspace({ repoPrefix: "chat-find-live-blocks-" });
-  const plugins = await connectNewWorkspaceDaemonClient();
-  const previous = await plugins.getDaemonConfig();
+  const stream = await createControlledStream();
+  const workspace = await seedWorkspace({ repoPrefix: "chat-find-live-blocks-" }).catch(
+    async (error) => {
+      await stream.cleanup();
+      throw error;
+    },
+  );
   const gate = await installDaemonWebSocketGate(page);
-  const append = (chunks: string[], finish = false) =>
-    plugins.invokePluginRpc("controlled-stream-test", "append", { chunks, finish });
-  let started = false;
   const cleanup = async () => {
     try {
-      if (started) await append([], true);
-      await plugins.removePlugin("controlled-stream-test");
-      await plugins.patchDaemonConfig({ pluginsEnabled: previous.config.pluginsEnabled });
+      await stream.cleanup();
     } finally {
-      await plugins.close();
       await workspace.cleanup();
     }
   };
   try {
-    await plugins.patchDaemonConfig({ pluginsEnabled: true });
-    await plugins.installDirectoryPlugin(
-      path.resolve(__dirname, "../support/fixtures/controlled-stream-plugin"),
-    );
     const agent = await workspace.client.createAgent({
-      provider: "controlled-stream",
+      provider: stream.provider,
       cwd: workspace.repoPath,
       workspaceId: workspace.workspaceId,
       title: "Chat Find live blocks",
     });
     await openAgentRoute(page, { workspaceId: workspace.workspaceId, agentId: agent.id });
     await workspace.client.sendAgentMessage(agent.id, "Stream a multi block answer");
-    started = true;
-    await append(STREAMED_PREFIX);
+    await stream.append(STREAMED_PREFIX);
     await expect(page.getByText("beta-needle", { exact: false }).last()).toBeVisible();
     return {
       cleanup,
       advancePastVisiblePrefix: async () => {
         const count = gate.getAgentStreamItemCount("assistant_message");
         gate.setAgentStreamSuppressed(true);
-        await append([HYDRATED_PARTIAL]);
+        await stream.append([HYDRATED_PARTIAL]);
         await gate.waitForAgentStreamItem("assistant_message", count + 1);
         await expect(page.getByTestId("assistant-message").last()).not.toContainText(
           HYDRATED_PARTIAL,
@@ -348,7 +340,7 @@ async function openChatStreamingMultiBlockReply(page: Page): Promise<StreamedRep
       },
       replyFinished: async () => {
         gate.setAgentStreamSuppressed(false);
-        await append([`\n\n${STREAMED_TAIL}`], true);
+        await stream.finish([`\n\n${STREAMED_TAIL}`]);
         await workspace.client.waitForFinish(agent.id, 15_000);
       },
     };
