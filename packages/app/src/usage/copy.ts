@@ -31,7 +31,6 @@ export const usageCopy = {
     return i18n.t("providerUsage.refreshing");
   },
   refreshFailed: "Unable to refresh usage",
-  updated: "Updated",
   get loading() {
     return i18n.t("providerUsage.loading");
   },
@@ -43,9 +42,11 @@ export const usageCopy = {
     return i18n.t("providerUsage.errorTitle");
   },
   agentError: (reason: string) => `Unable to load usage: ${reason}`,
-  hostUnavailable: (host: string) => `Connect to ${host} to see usage`,
-  hostUpgradeRequired: (host: string) => `Update ${host} to see usage`,
-  clientUnavailable: "Host connection is not ready",
+  hostUnavailable: (host: string) => i18n.t("providerUsage.hostUnavailable", { host }),
+  hostUpgradeRequired: (host: string) => i18n.t("providerUsage.hostUpgradeRequired", { host }),
+  get clientUnavailable() {
+    return i18n.t("providerUsage.clientUnavailable");
+  },
   get retry() {
     return i18n.t("providerUsage.retry");
   },

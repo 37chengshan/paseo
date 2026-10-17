@@ -12,7 +12,15 @@ interface ResolvedBalance {
   usedPct: number | null;
 }
 
-function resolveBalance(balance: UsageBalance, t: TFunction, locale?: string): ResolvedBalance {
+function resolveBalance({
+  balance,
+  t,
+  locale,
+}: {
+  balance: UsageBalance;
+  t: TFunction;
+  locale?: string;
+}): ResolvedBalance {
   const { used, remaining, limit, unit } = balance;
   const format = (value: number) => formatAmount(value, unit, locale);
   if (limit != null && limit > 0) {
@@ -48,8 +56,8 @@ function fillToneStyle(tone: UsageTone) {
 
 export function UsageBalanceBar({ balance }: { balance: UsageBalance }) {
   const { t, i18n } = useTranslation();
-  useRelativeTimeTick(balance.resetsAt != null);
-  const { amountText, usedPct } = resolveBalance(balance, t, i18n.resolvedLanguage);
+  useRelativeTimeTick({ enabled: balance.resetsAt != null });
+  const { amountText, usedPct } = resolveBalance({ balance, t, locale: i18n.resolvedLanguage });
   const tone = balance.tone ?? "default";
   const resetLabel = formatResetLabel(balance.resetsAt);
 

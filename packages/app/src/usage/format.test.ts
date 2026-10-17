@@ -82,6 +82,12 @@ describe("formatAmount", () => {
     expect(formatProviderUsageLabel("five_hour", "Session")).toBe("세션");
     expect(formatProviderUsageLabel("five_hour", "5-hour limit")).toBe("5-hour limit");
     expect(formatProviderUsageLabel("monthly", "Monthly")).toBe("월간");
+    expect(formatProviderUsageLabel("code_review:weekly", "Code review · Weekly")).toBe(
+      "코드 검토 · 주간",
+    );
+    expect(formatProviderUsageLabel("code_review:five_hour", "Code review · 5-hour")).toBe(
+      "코드 검토 · 5-hour",
+    );
     expect(formatProviderUsageLabel("credits", "Credits")).toBe("크레딧");
     expect(formatProviderUsageLabel("custom_limit", "Custom limit")).toBe("Custom limit");
   });

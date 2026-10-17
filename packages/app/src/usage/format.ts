@@ -12,6 +12,17 @@ const providerUsageLabelKeys = {
 } as const;
 
 export function formatProviderUsageLabel(id: string, fallback: string): string {
+  if (id.startsWith("code_review:")) {
+    const periodId = id.slice("code_review:".length);
+    const separator = " · ";
+    const periodFallback = fallback.includes(separator)
+      ? fallback.slice(fallback.lastIndexOf(separator) + separator.length)
+      : fallback;
+    return `${i18n.t(providerUsageLabelKeys.code_review)} · ${formatProviderUsageLabel(
+      periodId,
+      periodFallback,
+    )}`;
+  }
   const key =
     providerUsageLabelKeys[id as keyof typeof providerUsageLabelKeys] ??
     // Claude exposes its session window with a five-hour ID. Other sources use that same ID for

@@ -50,7 +50,7 @@ export function UsageWindowBar({
 
   const isAtRisk = window.runsOutAt != null && window.shortfallPct != null;
   const relativeTime = isAtRisk ? window.runsOutAt : window.resetsAt;
-  useRelativeTimeTick(relativeTime != null);
+  useRelativeTimeTick({ enabled: relativeTime != null });
   const trailing = isAtRisk
     ? formatRunsOutLabel(window.runsOutAt)
     : formatResetLabel(window.resetsAt);
