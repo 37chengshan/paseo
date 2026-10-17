@@ -12,7 +12,11 @@ const providerUsageLabelKeys = {
 } as const;
 
 export function formatProviderUsageLabel(id: string, fallback: string): string {
-  const key = providerUsageLabelKeys[id as keyof typeof providerUsageLabelKeys];
+  const key =
+    providerUsageLabelKeys[id as keyof typeof providerUsageLabelKeys] ??
+    // Claude exposes its session window with a five-hour ID. Other sources use that same ID for
+    // literal five-hour quotas, so retain their provider label unless this is Claude's Session.
+    (id === "five_hour" && fallback === "Session" ? providerUsageLabelKeys.session : undefined);
   return key ? i18n.t(key) : fallback;
 }
 
