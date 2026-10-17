@@ -300,7 +300,6 @@ describe("pi-subagents adapter", () => {
     ]);
     // The workflow call carries no agent/task, so the script file names the run.
     expect(upserts[0]?.title).toBe("rigor-ui-test.js");
-    expect(upserts[1]?.liveness).toBe("poll");
     expect(upserts[2]?.title).toBeUndefined();
   });
 
@@ -391,13 +390,11 @@ describe("pi-subagents adapter", () => {
         }),
       );
       await expect.poll(() => reportedUpsert(received, "call-wf:beta")).toBe(true);
-      expect(
-        subagentUpserts(received).map((event) => [event.id, event.status, event.liveness]),
-      ).toEqual(
+      expect(subagentUpserts(received).map((event) => [event.id, event.status])).toEqual(
         expect.arrayContaining([
-          ["call-wf:alpha", "running", "poll"],
-          ["call-wf:beta", "running", "poll"],
-          ["call-wf", "running", "poll"],
+          ["call-wf:alpha", "running"],
+          ["call-wf:beta", "running"],
+          ["call-wf", "running"],
         ]),
       );
 
@@ -443,12 +440,9 @@ describe("pi-subagents adapter", () => {
         },
       });
       await vi.advanceTimersByTimeAsync(250 * 5);
-      // The run is alive even while its file is missing: every miss tick re-reports the row, or a
-      // turn end inside the miss budget would cancel live work.
+      // A missing status file supplies no new outcome before the miss budget expires.
       const duringMisses = subagentUpserts(received);
-      expect(duringMisses.length).toBeGreaterThanOrEqual(5);
-      expect(duringMisses.every((event) => event.status === "running")).toBe(true);
-      expect(duringMisses.every((event) => event.liveness === "poll")).toBe(true);
+      expect(duringMisses).toEqual([]);
 
       // 60 s of missing ticks, the budget before a status directory counts as gone.
       await vi.advanceTimersByTimeAsync(250 * 236);
@@ -458,7 +452,6 @@ describe("pi-subagents adapter", () => {
         type: "upsert",
         id: "call-lost",
         status: "canceled",
-        liveness: "poll",
       });
       expect(afterGiveUp.filter((event) => event.status === "canceled")).toHaveLength(1);
     } finally {
@@ -987,7 +980,6 @@ describe("pi-subagents adapter", () => {
           id: "call-wf:alpha",
           title: "scout",
           status: "completed",
-          liveness: "poll",
         },
       ]);
 
@@ -1004,8 +996,7 @@ describe("pi-subagents adapter", () => {
   test("a workflow that reported rows replaces its placeholder with them", () => {
     const host = createPiExtensionHost();
     const args = { workflow: true };
-    // The in-flight placeholder is poll-marked, so a turn end can settle it if its call never
-    // reports back.
+    // The launch placeholder is replaced once the workflow supplies its child rows.
     expect(
       host.mapToolCall({
         callId: "fanout",
@@ -1014,7 +1005,7 @@ describe("pi-subagents adapter", () => {
         status: "running",
         result: null,
       })?.subagents,
-    ).toEqual([expect.objectContaining({ id: "fanout", status: "running", liveness: "poll" })]);
+    ).toEqual([expect.objectContaining({ id: "fanout", status: "running" })]);
     expect(
       host.mapToolCall({
         callId: "fanout",

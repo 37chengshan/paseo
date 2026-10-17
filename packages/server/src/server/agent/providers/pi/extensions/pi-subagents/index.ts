@@ -205,7 +205,7 @@ export const piSubagents: PiExtension = {
       const subagents: NonNullable<PiExtensionToolMapping["subagents"]> = [];
       for (const id of new Set([run.owner, ...run.rows])) {
         if (settledRows.has(id)) continue;
-        subagents.push({ type: "upsert", id, status: "canceled", liveness: "poll" });
+        subagents.push({ type: "upsert", id, status: "canceled" });
       }
       return subagents;
     };
@@ -305,7 +305,6 @@ export const piSubagents: PiExtension = {
             id,
             title: step.agent,
             status: childStatus,
-            liveness: "poll" as const,
           });
         } else if (!namedRows.has(id) || childSession) {
           // Attach a late transcript with its known verdict, so the host reads it once instead of
@@ -316,7 +315,6 @@ export const piSubagents: PiExtension = {
             id,
             title: step.agent,
             status: settledStatus,
-            liveness: "poll" as const,
           });
         }
         if (childSession) {
@@ -326,7 +324,7 @@ export const piSubagents: PiExtension = {
       }
       if (runTerminal) run.polling = false;
       // The launch row stands for the whole run, and a single unnamed child already took its
-      // id. Re-reporting it every tick is also what proves to the manager that this run is alive.
+      // id.
       // A row that already settled keeps that verdict: a result that landed before the run's
       // steps named its children must not be reverted to running by the next tick.
       if (!run.rows.has(run.owner) && !settledRows.has(run.owner)) {
@@ -336,7 +334,6 @@ export const piSubagents: PiExtension = {
           type: "upsert",
           id: run.owner,
           status: ownerStatus,
-          liveness: "poll",
         });
       }
       return { subagents, childSessions };
@@ -368,13 +365,13 @@ export const piSubagents: PiExtension = {
           recordTerminal(call.callId, "completed");
           return { subagents: [{ ...base, status: "completed" as const }] };
         }
-        // The placeholder row is now backed by a per-tick poll, which is what proves it alive.
+        // Follow the async run from its saved status or later poll updates.
         rememberAsyncRun(details.data, call);
         const dir = details.data.asyncDir;
         const run = dir ? asyncRuns.get(dir) : undefined;
         const status = dir ? readAsyncStatus(dir) : undefined;
         if (run && status) return projectAsyncStatus(run, status);
-        return { subagents: [{ ...base, status: "running" as const, liveness: "poll" as const }] };
+        return { subagents: [{ ...base, status: "running" as const }] };
       }
       const collected = collectRows(call.callId, details.data.results, description, failed);
       // A run that reported rows of its own never keeps the placeholder card it opened at launch.
@@ -403,13 +400,11 @@ export const piSubagents: PiExtension = {
         description: args.data.task,
         log: extractTextFromToolResult(call.result)?.trim() ?? "",
       };
-      // The in-flight placeholder is poll-marked: a turn interrupted before this call reports
-      // never delivers a terminal mapping, and only a marked row can be settled by the sweep.
       // ponytail: replay re-emits running before the settled rows land — one-pass client flip, upgrade when replay maps calls with their results first
       if (call.status === "running")
         return {
           detail,
-          subagents: [{ ...base, status: "running" as const, liveness: "poll" as const }],
+          subagents: [{ ...base, status: "running" as const }],
         };
       return {
         detail,
@@ -485,18 +480,6 @@ export const piSubagents: PiExtension = {
             if (run.misses >= POLL_MISS_LIMIT) {
               subagents.push(...giveUpRun(run));
               continue;
-            }
-            // The run is still alive even though its file is gone for now. Keep re-reporting its
-            // unsettled rows: silence would freeze their timestamp and a turn end would cancel a
-            // live run inside the miss budget.
-            for (const id of new Set([run.owner, ...run.rows])) {
-              if (settledRows.has(id)) continue;
-              subagents.push({
-                type: "upsert",
-                id,
-                status: "running" as const,
-                liveness: "poll" as const,
-              });
             }
             continue;
           }
