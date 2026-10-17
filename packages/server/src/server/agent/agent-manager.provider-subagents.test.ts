@@ -428,10 +428,13 @@ describe("provider subagent finalize", () => {
       // The real Pi adapter, so the miss ticks come from the poll that protects the row instead of
       // from a hand-written upsert.
       const pi = new FakePi();
-      const client = new PiRpcAgentClient({ logger: pino({ level: "silent" }), runtime: pi });
-      // CI runners have no pi installation; the runtime is the FakePi above, so only the
-      // availability probe needs a stub.
-      vi.spyOn(client, "isAvailable").mockResolvedValue(true);
+      const client = new PiRpcAgentClient({
+        logger: pino({ level: "silent" }),
+        runtime: pi,
+        // The injected runtime owns execution; use an existing executable for the real availability
+        // probe so this test does not depend on a Pi installation or replace a client method.
+        runtimeSettings: { command: { mode: "replace", argv: [process.execPath] } },
+      });
       const workdir = mkdtempSync(join(tmpdir(), "agent-manager-provider-subagent-poll-"));
       const manager = new AgentManager({
         clients: { pi: client },
