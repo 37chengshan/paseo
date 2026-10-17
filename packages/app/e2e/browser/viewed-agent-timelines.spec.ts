@@ -42,7 +42,7 @@ async function seedViewedTimelineScenario(
     config: ViewedAgentConfig = {
       provider: "mock",
       modeId: "load-test",
-      model: "ten-second-stream",
+      model: "e2e-fast-stream",
     },
   ) =>
     workspace.client.createAgent({

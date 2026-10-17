@@ -173,6 +173,14 @@ for (const layout of [
   });
 }
 
+async function captureContextThemes(page: Page, surface: string, state: string) {
+  for (const theme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: theme });
+    await expect(contextWindowDetails(page)).toBeVisible();
+    await qaScreenshot(page, `${surface}-${theme}-${state}`);
+  }
+}
+
 type OpenDetails = (page: Page) => Promise<Locator>;
 type Shot = (state: string) => Promise<void>;
 
@@ -241,140 +249,138 @@ async function expectOnlyContextWindowWithoutUsage(
   await shot("unsupported");
 }
 
-for (const theme of ["light", "dark"] as const) {
-  test(`the context window hover card shows the agent's usage (${theme})`, async ({
-    page,
-    agent,
-  }) => {
-    test.setTimeout(240_000);
-    const [claude] = claudeAndCodexReports();
-    const usage = await scriptAgentUsage(page);
-    await page.emulateMedia({ colorScheme: theme });
-    await page.setViewportSize(DESKTOP);
-    await openAgent(page, agent);
-    const shot: Shot = (state) => qaScreenshot(page, `hover-card-desktop-${theme}-${state}`);
+test("the context window hover card shows the agent's usage in both themes", async ({
+  page,
+  agent,
+}) => {
+  test.setTimeout(240_000);
+  const [claude] = claudeAndCodexReports();
+  const usage = await scriptAgentUsage(page);
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.setViewportSize(DESKTOP);
+  await openAgent(page, agent);
+  const shot: Shot = (state) => captureContextThemes(page, "hover-card-desktop", state);
 
-    await test.step("reports stream in one card at a time, each with Refresh", async () => {
-      const card = await expectCardsToStreamIn(page, usage, hoverContextWindowMeter, shot);
-      await expectRefreshButtons(card, 2);
-      await shot("ready");
-      expect(usage.agentRequests()).toEqual([agent.agentId]);
-    });
-
-    await test.step("the card stays open while the pointer moves onto it", async () => {
-      const card = contextWindowDetails(page);
-      await moveOntoContextWindowDetails(page, card);
-      await page.waitForTimeout(300);
-      await expect(card).toBeVisible();
-    });
-
-    await test.step("Refresh keeps the card open and replaces it with the new report", async () => {
-      const refreshed = gate();
-      usage.answerNext({ stream: [refreshed.promise, expiredLogin(onWorkLogin(claude!))] });
-      const card = contextWindowDetails(page);
-      await refreshUsageCard(card, "Claude");
-      await expect(card.getByRole("button", { name: "Refresh Claude" })).toBeDisabled();
-      // Past the card's close grace, with the pointer still on the card.
-      await page.waitForTimeout(500);
-      await expect(card).toBeVisible();
-      refreshed.open();
-      await expect(card.getByText(LOGIN_EXPIRED)).toBeVisible();
-      expect(usage.refreshedAgents()).toEqual([agent.agentId]);
-    });
-
-    await test.step("after a resume under another login, only that login shows", async () => {
-      // Refresh can retain focus; return to the composer before testing pointer dismissal.
-      await composerLocator(page).focus();
-      // Closed while the old login's report is still on its way.
-      await leaveContextWindowMeter(page);
-      const slowSource = gate();
-      usage.answerNext({ stream: [slowSource.promise, onWorkLogin(claude!)] });
-      const closedEarly = await hoverContextWindowMeter(page);
-      await expect(closedEarly.getByText("Loading usage...", { exact: true })).toBeVisible();
-      await leaveContextWindowMeter(page);
-
-      const resumed = gate();
-      const finished = gate();
-      usage.answerNext({
-        stream: [resumed.promise, onPersonalLogin(claude!), finished.promise],
-      });
-      const card = await hoverContextWindowMeter(page);
-      await expect(card.getByText("Loading usage...", { exact: true })).toBeVisible();
-      await expect(card.getByText("work@example.com", { exact: true })).toHaveCount(0);
-
-      // The old login's report lands during the new request, before the new login's.
-      slowSource.open();
-      resumed.open();
-      await expect(
-        usageCard(card, "claude:personal").getByText("personal@example.com", { exact: true }),
-      ).toBeVisible();
-      await expect(card.getByText("work@example.com", { exact: true })).toHaveCount(0);
-      finished.open();
-    });
-
-    await test.step("a report with a problem shows it on the card", async () => {
-      usage.answerNext([expiredLogin(onWorkLogin(claude!))]);
-      await reloadAgent(page);
-      const card = await hoverContextWindowMeter(page);
-      await expect(card.getByText(LOGIN_EXPIRED)).toBeVisible();
-      await shot("problem");
-    });
-
-    await test.step("a failed request says so in a sentence", async () => {
-      await expectFailedRequestSentence(page, usage, hoverContextWindowMeter, shot);
-    });
-
-    await test.step("a host without usage reports shows only the context window", async () => {
-      await expectOnlyContextWindowWithoutUsage(page, usage, hoverContextWindowMeter, shot);
-      // One request per open that had usage; this one sends none.
-      expect(usage.agentRequests()).toHaveLength(6);
-    });
+  await test.step("reports stream in one card at a time, each with Refresh", async () => {
+    const card = await expectCardsToStreamIn(page, usage, hoverContextWindowMeter, shot);
+    await expectRefreshButtons(card, 2);
+    await shot("ready");
+    expect(usage.agentRequests()).toEqual([agent.agentId]);
   });
 
-  test(`the context window sheet shows the agent's usage and refreshes it (${theme})`, async ({
-    page,
-    agent,
-  }) => {
-    test.setTimeout(240_000);
-    const [claude] = claudeAndCodexReports();
-    const usage = await scriptAgentUsage(page);
-    await page.emulateMedia({ colorScheme: theme });
-    await page.setViewportSize(COMPACT);
-    await openAgent(page, agent);
-    const shot: Shot = (state) => qaScreenshot(page, `sheet-compact-${theme}-${state}`);
-
-    await test.step("reports stream in one card at a time, each with Refresh", async () => {
-      const sheet = await expectCardsToStreamIn(page, usage, pressContextWindowMeter, shot);
-      await expectRefreshButtons(sheet, 2);
-      // Without hover, each card prints its freshness instead of a Refresh tooltip.
-      await expect(sheet.getByText("Updated just now", { exact: true })).toHaveCount(2);
-      await shot("ready");
-      expect(usage.agentRequests()).toEqual([agent.agentId]);
-    });
-
-    await test.step("Refresh replaces the card with the source's new report", async () => {
-      usage.answerNext([expiredLogin(onWorkLogin(claude!))]);
-      const sheet = contextWindowDetails(page);
-      await refreshUsageCard(sheet, "Claude");
-      await expect(sheet.getByText(LOGIN_EXPIRED)).toBeVisible();
-      expect(usage.refreshedAgents()).toEqual([agent.agentId]);
-      await shot("problem");
-    });
-
-    await test.step("Close dismisses the sheet", async () => {
-      await closeContextWindowSheet(page);
-    });
-
-    await test.step("a failed request says so in a sentence", async () => {
-      await expectFailedRequestSentence(page, usage, pressContextWindowMeter, shot);
-    });
-
-    await test.step("a host without usage reports shows only the context window", async () => {
-      await expectOnlyContextWindowWithoutUsage(page, usage, pressContextWindowMeter, shot);
-      expect(usage.agentRequests()).toHaveLength(3);
-    });
+  await test.step("the card stays open while the pointer moves onto it", async () => {
+    const card = contextWindowDetails(page);
+    await moveOntoContextWindowDetails(page, card);
+    await page.waitForTimeout(300);
+    await expect(card).toBeVisible();
   });
-}
+
+  await test.step("Refresh keeps the card open and replaces it with the new report", async () => {
+    const refreshed = gate();
+    usage.answerNext({ stream: [refreshed.promise, expiredLogin(onWorkLogin(claude!))] });
+    const card = contextWindowDetails(page);
+    await refreshUsageCard(card, "Claude");
+    await expect(card.getByRole("button", { name: "Refresh Claude" })).toBeDisabled();
+    // Past the card's close grace, with the pointer still on the card.
+    await page.waitForTimeout(500);
+    await expect(card).toBeVisible();
+    refreshed.open();
+    await expect(card.getByText(LOGIN_EXPIRED)).toBeVisible();
+    expect(usage.refreshedAgents()).toEqual([agent.agentId]);
+  });
+
+  await test.step("after a resume under another login, only that login shows", async () => {
+    // Refresh can retain focus; return to the composer before testing pointer dismissal.
+    await composerLocator(page).focus();
+    // Closed while the old login's report is still on its way.
+    await leaveContextWindowMeter(page);
+    const slowSource = gate();
+    usage.answerNext({ stream: [slowSource.promise, onWorkLogin(claude!)] });
+    const closedEarly = await hoverContextWindowMeter(page);
+    await expect(closedEarly.getByText("Loading usage...", { exact: true })).toBeVisible();
+    await leaveContextWindowMeter(page);
+
+    const resumed = gate();
+    const finished = gate();
+    usage.answerNext({
+      stream: [resumed.promise, onPersonalLogin(claude!), finished.promise],
+    });
+    const card = await hoverContextWindowMeter(page);
+    await expect(card.getByText("Loading usage...", { exact: true })).toBeVisible();
+    await expect(card.getByText("work@example.com", { exact: true })).toHaveCount(0);
+
+    // The old login's report lands during the new request, before the new login's.
+    slowSource.open();
+    resumed.open();
+    await expect(
+      usageCard(card, "claude:personal").getByText("personal@example.com", { exact: true }),
+    ).toBeVisible();
+    await expect(card.getByText("work@example.com", { exact: true })).toHaveCount(0);
+    finished.open();
+  });
+
+  await test.step("a report with a problem shows it on the card", async () => {
+    usage.answerNext([expiredLogin(onWorkLogin(claude!))]);
+    await reloadAgent(page);
+    const card = await hoverContextWindowMeter(page);
+    await expect(card.getByText(LOGIN_EXPIRED)).toBeVisible();
+    await shot("problem");
+  });
+
+  await test.step("a failed request says so in a sentence", async () => {
+    await expectFailedRequestSentence(page, usage, hoverContextWindowMeter, shot);
+  });
+
+  await test.step("a host without usage reports shows only the context window", async () => {
+    await expectOnlyContextWindowWithoutUsage(page, usage, hoverContextWindowMeter, shot);
+    // One request per open that had usage; this one sends none.
+    expect(usage.agentRequests()).toHaveLength(6);
+  });
+});
+
+test("the context window sheet shows the agent's usage and refreshes it in both themes", async ({
+  page,
+  agent,
+}) => {
+  test.setTimeout(240_000);
+  const [claude] = claudeAndCodexReports();
+  const usage = await scriptAgentUsage(page);
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.setViewportSize(COMPACT);
+  await openAgent(page, agent);
+  const shot: Shot = (state) => captureContextThemes(page, "sheet-compact", state);
+
+  await test.step("reports stream in one card at a time, each with Refresh", async () => {
+    const sheet = await expectCardsToStreamIn(page, usage, pressContextWindowMeter, shot);
+    await expectRefreshButtons(sheet, 2);
+    // Without hover, each card prints its freshness instead of a Refresh tooltip.
+    await expect(sheet.getByText("Updated just now", { exact: true })).toHaveCount(2);
+    await shot("ready");
+    expect(usage.agentRequests()).toEqual([agent.agentId]);
+  });
+
+  await test.step("Refresh replaces the card with the source's new report", async () => {
+    usage.answerNext([expiredLogin(onWorkLogin(claude!))]);
+    const sheet = contextWindowDetails(page);
+    await refreshUsageCard(sheet, "Claude");
+    await expect(sheet.getByText(LOGIN_EXPIRED)).toBeVisible();
+    expect(usage.refreshedAgents()).toEqual([agent.agentId]);
+    await shot("problem");
+  });
+
+  await test.step("Close dismisses the sheet", async () => {
+    await closeContextWindowSheet(page);
+  });
+
+  await test.step("a failed request says so in a sentence", async () => {
+    await expectFailedRequestSentence(page, usage, pressContextWindowMeter, shot);
+  });
+
+  await test.step("a host without usage reports shows only the context window", async () => {
+    await expectOnlyContextWindowWithoutUsage(page, usage, pressContextWindowMeter, shot);
+    expect(usage.agentRequests()).toHaveLength(3);
+  });
+});
 
 test("context details support keyboard entry and dismiss when the viewport moves", async ({
   page,
@@ -420,36 +426,38 @@ test("context details support keyboard entry and dismiss when the viewport moves
   await expect(details).toHaveCount(0);
 });
 
-test("pointer hovering context details preserves composer focus", async ({ page, agent }) => {
+test("context details preserve composer focus on hover and leave Find available after keyboard dismissal", async ({
+  page,
+  agent,
+}) => {
   const usage = await scriptAgentUsage(page);
   await page.setViewportSize(DESKTOP);
   await openAgent(page, agent);
   const [claude] = claudeAndCodexReports();
-  usage.answerNext([onPersonalLogin(claude!)]);
-  const input = composerLocator(page);
-  await input.focus();
-  await hoverContextWindowMeter(page);
-  await expect(input).toBeFocused();
-  await leaveContextWindowMeter(page);
-  await expect(input).toBeFocused();
-});
 
-test("Find remains available after dismissing context details", async ({ page, agent }) => {
-  const usage = await scriptAgentUsage(page);
-  await page.setViewportSize(DESKTOP);
-  await openAgent(page, agent);
-  const [claude] = claudeAndCodexReports();
-  usage.answerNext([onPersonalLogin(claude!)]);
-  const meter = page.getByTestId("context-window-meter");
-  const trigger = page.getByRole("button", {
-    name: (await meter.getAttribute("aria-label"))!,
-    exact: true,
+  await test.step("pointer entry and dismissal preserve composer focus", async () => {
+    usage.answerNext([onPersonalLogin(claude!)]);
+    const input = composerLocator(page);
+    await input.focus();
+    await hoverContextWindowMeter(page);
+    await expect(input).toBeFocused();
+    await leaveContextWindowMeter(page);
+    await expect(input).toBeFocused();
   });
-  await trigger.focus();
-  await expect(contextWindowDetails(page)).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(contextWindowDetails(page)).toHaveCount(0);
-  await expect(trigger).toBeFocused();
-  await page.keyboard.press("ControlOrMeta+f");
-  await expect(page.getByRole("textbox", { name: "Find in pane", exact: true })).toBeFocused();
+
+  await test.step("keyboard dismissal restores trigger focus and Find remains available", async () => {
+    usage.answerNext([onPersonalLogin(claude!)]);
+    const meter = page.getByTestId("context-window-meter");
+    const trigger = page.getByRole("button", {
+      name: (await meter.getAttribute("aria-label"))!,
+      exact: true,
+    });
+    await trigger.focus();
+    await expect(contextWindowDetails(page)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(contextWindowDetails(page)).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await page.keyboard.press("ControlOrMeta+f");
+    await expect(page.getByRole("textbox", { name: "Find in pane", exact: true })).toBeFocused();
+  });
 });
