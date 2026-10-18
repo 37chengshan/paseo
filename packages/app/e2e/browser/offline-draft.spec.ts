@@ -11,7 +11,7 @@ async function restoreHostConnection(gate: Awaited<ReturnType<typeof installDaem
   gate.releaseHeldServerMessage("status");
 }
 
-test("an offline workspace draft reports the disconnected host instead of loading models", async ({
+test("an offline workspace draft clears its connection error when the host reconnects", async ({
   page,
   withWorkspace,
 }) => {
@@ -28,5 +28,6 @@ test("an offline workspace draft reports the disconnected host instead of loadin
   await expect(page.getByText("Loading...", { exact: true })).toHaveCount(0);
   await restoreHostConnection(gate);
   await expectComposerModel(page, "Ten second stream");
+  await expect(page.getByRole("alert").filter({ hasText: "Host is not connected" })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Message agent..." })).toHaveValue("hello");
 });
