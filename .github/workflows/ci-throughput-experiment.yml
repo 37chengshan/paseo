@@ -1,0 +1,318 @@
+name: CI throughput experiment
+on:
+  push:
+    branches:
+      - investigate-ci-throughput
+    paths:
+      - .github/workflows/ci-throughput-experiment.yml
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: ci-throughput-experiment
+  cancel-in-progress: false
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+jobs:
+  pw-shard4-w2:
+    name: pw-shard4-w2
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PLAYWRIGHT_SHARD: 4/4
+      PLAYWRIGHT_ARTIFACT: pw-shard4-w2
+      E2E_WORKERS: "2"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record runner capacity
+        run: node -e "const os=require('node:os');
+          console.log(JSON.stringify({cpus:os.cpus().length,model:os.cpus()[0].model,memory:os.totalmem(),platform:os.platform()},null,2))"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies with retry
+        run: node scripts/npm-retry.mjs ci
+      - name: Install Playwright browsers
+        timeout-minutes: 10
+        run: npx playwright install chromium
+      - name: Build server stack
+        run: npm run build:server
+      - name: Build native app dependency
+        run: npm run build --workspace=@getpaseo/expo-two-way-audio
+      - name: Install agent CLIs for provider tests
+        run: node scripts/npm-retry.mjs install -g @anthropic-ai/claude-code @openai/codex@0.105.0
+          opencode-ai
+      - name: Run Playwright E2E tests
+        run: npm run test:e2e --workspace=@getpaseo/app -- --shard=${{ env.PLAYWRIGHT_SHARD }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PWTEST_SHARD_WEIGHTS: 111:172:137:160
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pw-shard4-w2
+          path: |
+            packages/app/test-results/
+            packages/app/playwright-report/
+          retention-days: 7
+  pw-shard4-w3:
+    name: pw-shard4-w3
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PLAYWRIGHT_SHARD: 4/4
+      PLAYWRIGHT_ARTIFACT: pw-shard4-w3
+      E2E_WORKERS: "3"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record runner capacity
+        run: node -e "const os=require('node:os');
+          console.log(JSON.stringify({cpus:os.cpus().length,model:os.cpus()[0].model,memory:os.totalmem(),platform:os.platform()},null,2))"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies with retry
+        run: node scripts/npm-retry.mjs ci
+      - name: Install Playwright browsers
+        timeout-minutes: 10
+        run: npx playwright install chromium
+      - name: Build server stack
+        run: npm run build:server
+      - name: Build native app dependency
+        run: npm run build --workspace=@getpaseo/expo-two-way-audio
+      - name: Install agent CLIs for provider tests
+        run: node scripts/npm-retry.mjs install -g @anthropic-ai/claude-code @openai/codex@0.105.0
+          opencode-ai
+      - name: Run Playwright E2E tests
+        run: npm run test:e2e --workspace=@getpaseo/app -- --shard=${{ env.PLAYWRIGHT_SHARD }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PWTEST_SHARD_WEIGHTS: 111:172:137:160
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pw-shard4-w3
+          path: |
+            packages/app/test-results/
+            packages/app/playwright-report/
+          retention-days: 7
+  pw-shard4-w4:
+    name: pw-shard4-w4
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PLAYWRIGHT_SHARD: 4/4
+      PLAYWRIGHT_ARTIFACT: pw-shard4-w4
+      E2E_WORKERS: "4"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record runner capacity
+        run: node -e "const os=require('node:os');
+          console.log(JSON.stringify({cpus:os.cpus().length,model:os.cpus()[0].model,memory:os.totalmem(),platform:os.platform()},null,2))"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies with retry
+        run: node scripts/npm-retry.mjs ci
+      - name: Install Playwright browsers
+        timeout-minutes: 10
+        run: npx playwright install chromium
+      - name: Build server stack
+        run: npm run build:server
+      - name: Build native app dependency
+        run: npm run build --workspace=@getpaseo/expo-two-way-audio
+      - name: Install agent CLIs for provider tests
+        run: node scripts/npm-retry.mjs install -g @anthropic-ai/claude-code @openai/codex@0.105.0
+          opencode-ai
+      - name: Run Playwright E2E tests
+        run: npm run test:e2e --workspace=@getpaseo/app -- --shard=${{ env.PLAYWRIGHT_SHARD }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PWTEST_SHARD_WEIGHTS: 111:172:137:160
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pw-shard4-w4
+          path: |
+            packages/app/test-results/
+            packages/app/playwright-report/
+          retention-days: 7
+  pw-shard4-w2-prod:
+    name: pw-shard4-w2-prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PLAYWRIGHT_SHARD: 4/4
+      PLAYWRIGHT_ARTIFACT: prod
+      E2E_WORKERS: "2"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record runner capacity
+        run: node -e "const os=require('node:os');
+          console.log(JSON.stringify({cpus:os.cpus().length,model:os.cpus()[0].model,memory:os.totalmem(),platform:os.platform()},null,2))"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies with retry
+        run: node scripts/npm-retry.mjs ci
+      - name: Install Playwright browsers
+        timeout-minutes: 10
+        run: npx playwright install chromium
+      - name: Build server stack
+        run: npm run build:server
+      - name: Build native app dependency
+        run: npm run build --workspace=@getpaseo/expo-two-way-audio
+      - name: Install agent CLIs for provider tests
+        run: node scripts/npm-retry.mjs install -g @anthropic-ai/claude-code @openai/codex@0.105.0
+          opencode-ai
+      - name: Serve the production-mode bundle for this experiment only
+        run: >-
+          node <<'NODE'
+
+          const fs = require('node:fs');
+
+          const file = 'packages/app/e2e/support/global-setup.ts';
+
+          const source = fs.readFileSync(file, 'utf8');
+
+          const before = '[expoCli, "start", "--web", "--port", String(port)]';
+
+          if (source.split(before).length !== 2) throw new Error('Expected one Metro launch');
+
+          fs.writeFileSync(file, source.replace(before, '[expoCli, "start", "--web", "--no-dev",
+          "--minify", "--port", String(port)]'));
+
+          NODE
+      - name: Run Playwright E2E tests
+        run: npm run test:e2e --workspace=@getpaseo/app -- --shard=${{ env.PLAYWRIGHT_SHARD }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PWTEST_SHARD_WEIGHTS: 111:172:137:160
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pw-shard4-w2-prod
+          path: |
+            packages/app/test-results/
+            packages/app/playwright-report/
+          retention-days: 7
+  win-unit-mw2:
+    name: win-unit-mw2
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Record runner capacity
+        run: node -e "const os=require('node:os');
+          console.log(JSON.stringify({cpus:os.cpus().length,model:os.cpus()[0].model,memory:os.totalmem(),platform:os.platform()},null,2))"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Fetch origin/main (worktree tests)
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+      - name: Install dependencies
+        run: node scripts/npm-retry.mjs ci
+      - name: Install agent CLIs for provider tests
+        run: node scripts/npm-retry.mjs install -g @anthropic-ai/claude-code opencode-ai
+      - name: Build server dependencies
+        run: npm run build:server-deps
+      - name: Run Windows unit experiment
+        run: npm run test:unit --workspace=@getpaseo/server -- --maxWorkers=2 --reporter=default
+          --reporter=json --outputFile=unit-experiment.json
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      - name: Upload unit results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win-unit-mw2
+          path: packages/server/unit-experiment.json
+          if-no-files-found: warn
+  win-unit-mw3:
+    name: win-unit-mw3
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Record runner capacity
+        run: node -e "const os=require('node:os');
+          console.log(JSON.stringify({cpus:os.cpus().length,model:os.cpus()[0].model,memory:os.totalmem(),platform:os.platform()},null,2))"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Fetch origin/main (worktree tests)
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+      - name: Install dependencies
+        run: node scripts/npm-retry.mjs ci
+      - name: Install agent CLIs for provider tests
+        run: node scripts/npm-retry.mjs install -g @anthropic-ai/claude-code opencode-ai
+      - name: Build server dependencies
+        run: npm run build:server-deps
+      - name: Run Windows unit experiment
+        run: npm run test:unit --workspace=@getpaseo/server -- --maxWorkers=3 --reporter=default
+          --reporter=json --outputFile=unit-experiment.json
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      - name: Upload unit results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win-unit-mw3
+          path: packages/server/unit-experiment.json
+          if-no-files-found: warn
+  win-unit-shard1of3:
+    name: win-unit-shard1of3
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Record runner capacity
+        run: node -e "const os=require('node:os');
+          console.log(JSON.stringify({cpus:os.cpus().length,model:os.cpus()[0].model,memory:os.totalmem(),platform:os.platform()},null,2))"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Fetch origin/main (worktree tests)
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+      - name: Install dependencies
+        run: node scripts/npm-retry.mjs ci
+      - name: Install agent CLIs for provider tests
+        run: node scripts/npm-retry.mjs install -g @anthropic-ai/claude-code opencode-ai
+      - name: Build server dependencies
+        run: npm run build:server-deps
+      - name: Run Windows unit experiment
+        run:
+          npm run test:unit --workspace=@getpaseo/server -- --shard=1/3 --maxWorkers=1 --reporter=default
+          --reporter=json --outputFile=unit-experiment.json
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      - name: Upload unit results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win-unit-shard1of3
+          path: packages/server/unit-experiment.json
+          if-no-files-found: warn
