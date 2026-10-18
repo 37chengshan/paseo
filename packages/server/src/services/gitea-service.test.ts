@@ -430,6 +430,47 @@ function giteaMergeStatus(
 }
 
 describe("createGiteaService", () => {
+  it("coalesces concurrent current PR list reads across worktrees of one repository", async () => {
+    const { service, calls } = makeService(() => ok("[]"));
+
+    const statuses = await Promise.all(
+      ["one", "two", "three"].map((branch) =>
+        service.getCurrentPullRequestStatus({
+          cwd: `/worktrees/${branch}`,
+          headRef: branch,
+          reason: "self-heal-forge-pr-status",
+        }),
+      ),
+    );
+
+    expect(statuses).toEqual([null, null, null]);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("stops another worktree's refresh after the shared endpoint reports Too Many Requests", async () => {
+    const { service, calls } = makeService((args) => {
+      throw new TeaCommandError({
+        args,
+        cwd: "/worktrees/one",
+        exitCode: 1,
+        stderr:
+          "Error: Get https://gitea.com/api/v1/repos/example-user/sample-repo/pulls: Too Many Requests",
+      });
+    });
+
+    for (const branch of ["one", "two"]) {
+      await expect(
+        service.getCurrentPullRequestStatus({
+          cwd: `/worktrees/${branch}`,
+          headRef: branch,
+          reason: "self-heal-forge-pr-status",
+        }),
+      ).rejects.toThrow(TeaCommandError);
+    }
+
+    expect(calls).toHaveLength(1);
+  });
+
   it("maps a tea pr list item to the neutral current PR status by head branch", async () => {
     const { service, calls } = makeService((args) => {
       if (args[0] === "pr" && args[1] === "list")
