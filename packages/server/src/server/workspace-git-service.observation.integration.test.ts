@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -529,7 +537,14 @@ test("Git observation measurement separates startup from idle and reaches its de
   const script = fileURLToPath(
     new URL("../../scripts/measure-git-observation.ts", import.meta.url),
   );
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "paseo-measurement-test-")));
+  const actualTemp = path.join(root, "actual");
+  const aliasedTemp = path.join(root, "alias");
+  mkdirSync(actualTemp);
+  symlinkSync(actualTemp, aliasedTemp, "junction");
+  cleanup.push(async () => rmSync(root, { recursive: true, force: true }));
   const { stdout } = await promisify(execFile)(process.execPath, ["--import", "tsx", script], {
+    env: { ...process.env, TMPDIR: aliasedTemp, TMP: aliasedTemp, TEMP: aliasedTemp },
     timeout: 30_000,
     maxBuffer: 1024 * 1024,
   });

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -191,7 +191,11 @@ async function closeMeasuredService(input: {
 }
 
 async function main(): Promise<void> {
-  const tempDir = mkdtempSync(path.join(tmpdir(), "paseo-git-observation-measurement-"));
+  // Git reports physical roots; keep watcher-failure injection in that same
+  // spelling when the system temporary directory is a symlink.
+  const tempDir = realpathSync(
+    mkdtempSync(path.join(tmpdir(), "paseo-git-observation-measurement-")),
+  );
   const repoDir = path.join(tempDir, "repo");
   const paseoHome = path.join(tempDir, "paseo-home");
   const trackedPath = path.join(repoDir, "tracked.txt");
