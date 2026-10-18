@@ -206,10 +206,10 @@ jobs:
 
           const warmupSource = fs.readFileSync(warmup, 'utf8');
 
-          if (warmupSource.split('AbortSignal.timeout(120_000)').length !== 2) throw new
+          if (warmupSource.split('AbortSignal.timeout(120_000)').length !== 3) throw new
           Error('Expected one warmup deadline');
 
-          fs.writeFileSync(warmup, warmupSource.replace('AbortSignal.timeout(120_000)',
+          fs.writeFileSync(warmup, warmupSource.replaceAll('AbortSignal.timeout(120_000)',
           'AbortSignal.timeout(600_000)'));
 
           NODE
