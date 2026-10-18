@@ -6,6 +6,13 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, onTestFinished, test } from "vitest";
+import pino from "pino";
+import {
+  LocalSpeechWorkerClient,
+  WorkerBackedSpeechToTextProvider,
+  WorkerBackedTurnDetectionProvider,
+} from "./worker-client.js";
+import { createVoiceTurnController } from "../../../session/voice/voice-turn-controller.js";
 
 import { parsePcm16MonoWav, wordSimilarity } from "../../../test-utils/dictation-e2e.js";
 import { ensureSherpaOnnxModels } from "./sherpa/model-downloader.js";
@@ -222,6 +229,78 @@ test("delivers audio and serves control requests while later TTS is synthesizing
   await second;
   expect(completed).toEqual(["first", "second"]);
 }, 120_000);
+
+workerSpeechTest(
+  "voice input resumes after its local speech worker is replaced",
+  async () => {
+    const workers: ChildProcess[] = [];
+    const logger = pino({ level: "silent" });
+    const client = new LocalSpeechWorkerClient({
+      logger,
+      config: {
+        modelsDir,
+        voiceSttModel: "parakeet-tdt-0.6b-v2-int8",
+        dictationSttModel: "parakeet-tdt-0.6b-v2-int8",
+        voiceTtsModel: "kokoro-en-v0_19",
+      },
+      forkWorker: () => {
+        const worker = forkWorker();
+        workers.push(worker);
+        return worker;
+      },
+    });
+    const transcripts: string[] = [];
+    const errors: Error[] = [];
+    const controller = createVoiceTurnController({
+      logger,
+      stt: new WorkerBackedSpeechToTextProvider(client, "voiceStt"),
+      turnDetection: new WorkerBackedTurnDetectionProvider(client),
+      callbacks: {
+        async onSpeechStarted() {},
+        async onSpeechStopped() {},
+        async onPartialTranscript() {},
+        async onFinalTranscript(input) {
+          transcripts.push(input.transcript);
+        },
+        onError(error) {
+          errors.push(error);
+        },
+      },
+    });
+    const { pcm16, sampleRate } = parsePcm16MonoWav(await readFile(fixturePath("recording.wav")));
+    const input = Buffer.concat([pcm16, Buffer.alloc(sampleRate * 4)]);
+    async function sendUtterance() {
+      for (let offset = 0; offset < input.length; offset += 3200) {
+        await controller.appendClientChunk({
+          audioBase64: input.subarray(offset, offset + 3200).toString("base64"),
+          format: `audio/pcm;rate=${sampleRate}`,
+        });
+        // Pace IPC so speech events are consumed before the next audio boundary.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      await client.transcribeVoice(Buffer.alloc(0), `audio/pcm;rate=${sampleRate}`);
+    }
+    try {
+      await controller.start();
+      await sendUtterance();
+      await expect.poll(() => transcripts.length).toBe(1);
+      const firstWorker = workers[0];
+      const exited = new Promise<void>((resolve) => firstWorker.once("close", () => resolve()));
+      firstWorker.kill("SIGKILL");
+      await exited;
+      await expect.poll(() => errors.length).toBeGreaterThan(0);
+      // A successful transcription request proves that the replacement is serving requests.
+      await client.transcribeVoice(Buffer.alloc(0), `audio/pcm;rate=${sampleRate}`);
+      await sendUtterance();
+      await expect.poll(() => transcripts.length, { timeout: 3000 }).toBe(2);
+      expect(transcripts.every((text) => text.toLowerCase().includes("voice note"))).toBe(true);
+    } finally {
+      await controller.stop();
+      client.shutdown();
+    }
+  },
+  120_000,
+);
 
 type RequestInput = LocalSpeechWorkerRequest extends infer Request
   ? Request extends LocalSpeechWorkerRequest
