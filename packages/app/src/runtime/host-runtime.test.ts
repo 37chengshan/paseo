@@ -4440,3 +4440,49 @@ describe("HostRuntimeStore initial connection hint bootstrap", () => {
     expect(store.getHosts()).toHaveLength(0);
   });
 });
+
+// Diagnostic coverage for #3817. Corrupt storage is injected explicitly;
+// these tests do not reproduce the macOS 0.5.1 -> 0.5.2 updater.
+describe("host registry preservation during startup (#3817 diagnostic)", () => {
+  it("loads a valid saved remote host without changing its registry", async () => {
+    const host = makeHost();
+    const raw = JSON.stringify([host]);
+    const storage = createMemoryHostRuntimeStorage({
+      "@paseo:daemon-registry": raw,
+      "@paseo:e2e": "1",
+    });
+    const store = createAppearanceStore(storage);
+    try {
+      await store.boot();
+      expect(store.getHosts().map((entry) => entry.serverId)).toEqual([host.serverId]);
+      expect(await storage.getItem("@paseo:daemon-registry")).toBe(raw);
+    } finally {
+      store.syncHosts([]);
+    }
+  });
+
+  it.each([
+    ["malformed JSON", "[{"],
+    [
+      "an unknown field beside a valid host",
+      JSON.stringify([
+        makeHost(),
+        { ...makeHost({ serverId: "srv_other" }), unexpectedField: true },
+      ]),
+    ],
+  ])("preserves saved bytes when startup encounters %s", async (_name, raw) => {
+    const storage = createMemoryHostRuntimeStorage({
+      "@paseo:daemon-registry": raw,
+      "@paseo:e2e": "1",
+    });
+    const store = createAppearanceStore(storage);
+    try {
+      await store.boot();
+      expect(store.getHostRegistryStatus()).toBe("ready");
+      expect(store.getHosts()).toEqual([]);
+      expect(await storage.getItem("@paseo:daemon-registry")).toBe(raw);
+    } finally {
+      store.syncHosts([]);
+    }
+  });
+});
