@@ -287,6 +287,45 @@ function expectNestedChildren(events: AgentStreamEvent[]) {
 }
 
 describe("PluginAgentClientRegistry", () => {
+  test("returns unavailable when steering a provider without prompt.steer capability", async () => {
+    const harness = createProviderHarness();
+    const registry = new PluginAgentClientRegistry(createTestLogger());
+    registry.replace([harness.registration]);
+    const session = await registry.clients()[harness.registration.id]!.createSession({
+      provider: harness.registration.id,
+      cwd: "/tmp",
+    });
+    try {
+      await expect(
+        session.steerActiveTurn!("follow up", { expectedTurnId: "turn-1" }),
+      ).resolves.toEqual({ status: "unavailable" });
+      expect(harness.inputs.filter((input) => input.type === "session.prompt")).toHaveLength(0);
+    } finally {
+      await session.close();
+      registry.replace([]);
+    }
+  });
+
+  test("resumes a native ACP handle after the same provider ID moves to a plugin", async () => {
+    const harness = createProviderHarness();
+    const registry = new PluginAgentClientRegistry(createTestLogger());
+    registry.replace([harness.registration]);
+    try {
+      const session = await registry.clients()[harness.registration.id]!.resumeSession(
+        {
+          provider: harness.registration.id,
+          sessionId: "native-session-id",
+          nativeHandle: "native-session-id",
+          metadata: { provider: "acp", cwd: "/tmp" },
+        },
+        { provider: harness.registration.id, cwd: "/tmp" },
+      );
+      await session.close();
+    } finally {
+      registry.replace([]);
+    }
+  });
+
   test("stores only agent options while the plugin receives merged defaults", async () => {
     const logger = createTestLogger();
     const harness = createProviderHarness();

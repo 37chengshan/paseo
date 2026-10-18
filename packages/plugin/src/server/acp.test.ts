@@ -1246,6 +1246,49 @@ describe("runAcpProvider streamed chunks without messageId (#4699)", () => {
     messageId?: string;
   }
 
+  it("keeps reasoning separate from a reply sharing its native message ID", async () => {
+    const harness = connectorHarness({
+      promptUpdates: () => [
+        textChunk("private reasoning", "agent_thought_chunk", "shared-id"),
+        textChunk("public reply", "agent_message_chunk", "shared-id"),
+      ],
+    });
+    const registration = runAcpProvider({
+      id: "chunk-acp",
+      label: "Chunk ACP",
+      connector: harness.connector,
+    });
+    const connection = await registration.connect({
+      versions: [1],
+      capabilities: ["prompt.message"],
+    });
+    const events: ProviderEvent[] = [];
+    connection.onEvent((event) => events.push(event));
+    try {
+      await connection.send(openInput());
+      await waitForEvent(events, (event) => event.type === "session.ready");
+      await connection.send({
+        type: "session.prompt",
+        sessionId: "session-1",
+        prompt: {
+          clientMessageId: "same-id",
+          delivery: "auto",
+          input: { type: "message", content: [{ type: "text", text: "hello" }] },
+        },
+      });
+      await waitForEvent(
+        events,
+        (event) => event.type === "session.turn" && event.state === "completed",
+      );
+      const reply = events.findLast(
+        (event) => event.type === "timeline.item" && event.item.type === "assistant_message",
+      );
+      expect(reply).toMatchObject({ item: { text: "public reply" } });
+    } finally {
+      await connection.close();
+    }
+  });
+
   it("continues one timeline item per turn instead of one per chunk", async () => {
     const chunksByPrompt: Record<string, Chunk[]> = {
       first: [
