@@ -5,9 +5,48 @@ import path from "node:path";
 import { describe, expect, test } from "vitest";
 
 import { createTestLogger } from "../../../test-utils/test-logger.js";
+import { AgentManager } from "../agent-manager.js";
+import { buildProviderRegistry } from "../provider-registry.js";
 import { GenericACPAgentClient } from "./generic-acp-agent.js";
 
 describe("GenericACPAgentClient slash commands", () => {
+  test("lists draft commands when a custom ACP model is named default", async () => {
+    await withFakeACPAgent("commands-after-session-new", async (command, cwd) => {
+      const logger = createTestLogger();
+      const registry = buildProviderRegistry(logger, {
+        providerOverrides: {
+          "custom-acp": { extends: "acp", label: "Custom ACP", command },
+        },
+      });
+      const client = registry["custom-acp"]!.createClient(logger);
+      const manager = new AgentManager({ clients: { "custom-acp": client }, logger });
+      const expectedCommands = [
+        {
+          name: "review",
+          description: "Review the diff",
+          argumentHint: "query",
+          kind: "command",
+        },
+        { name: "status", description: "Show status", argumentHint: "", kind: "command" },
+      ];
+
+      await expect(
+        manager.listDraftCommands({ provider: "custom-acp", cwd, model: "inherit" }),
+      ).resolves.toEqual(expectedCommands);
+
+      const session = await client.createSession({ provider: "custom-acp", cwd, model: "default" });
+      try {
+        await expect(session.listCommands?.()).resolves.toEqual(expectedCommands);
+      } finally {
+        await session.close();
+      }
+
+      await expect(
+        manager.listDraftCommands({ provider: "custom-acp", cwd, model: "default" }),
+      ).resolves.toEqual(expectedCommands);
+    });
+  });
+
   test("preserves argument hints in commands advertised right after session/new", async () => {
     await withFakeACPAgent("commands-after-session-new", async (command, cwd) => {
       const client = new GenericACPAgentClient({
@@ -92,7 +131,19 @@ rl.on("line", (line) => {
     if (mode === "commands-after-session-new") {
       process.stdout.write(
         [
-          { id: message.id, result: { sessionId: "session-1" } },
+          {
+            id: message.id,
+            result: {
+              sessionId: "session-1",
+              models: {
+                currentModelId: "default",
+                availableModels: [
+                  { modelId: "default", name: "Default" },
+                  { modelId: "inherit", name: "Inherit" },
+                ],
+              },
+            },
+          },
           {
             method: "session/update",
             params: {
