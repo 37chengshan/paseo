@@ -55,6 +55,10 @@ async function openWorkspaceFile(page: Page, filename: string): Promise<void> {
   await expectFileTabOpen(page, filename);
 }
 
+function filePanelSwitcher(page: Page) {
+  return page.getByTestId("file-panel-switcher").filter({ visible: true });
+}
+
 function htmlPreview(page: Page) {
   return {
     host: page.getByTestId("file-html-preview"),
@@ -62,11 +66,9 @@ function htmlPreview(page: Page) {
   };
 }
 
-async function selectFileView(page: Page, view: "Preview" | "Source"): Promise<void> {
-  const option = page.getByTestId("file-panel-bar").getByRole("button", {
-    name: view,
-    exact: true,
-  });
+/** Switches the file tab to one of its panels from the bar's switcher. */
+async function selectFilePanel(page: Page, title: string): Promise<void> {
+  const option = filePanelSwitcher(page).getByRole("button", { name: title, exact: true });
   await option.click();
   await expect(option).toHaveAttribute("aria-selected", "true");
 }
@@ -484,9 +486,9 @@ test.describe("CodeMirror workspace file editing", () => {
       relativePath,
     );
     await expect(page.getByTestId("file-panel-bar")).not.toContainText("visuals.md");
-    const modeControl = page.getByTestId("file-preview-mode");
+    const modeControl = filePanelSwitcher(page);
     await expect(modeControl).toBeVisible();
-    await selectFileView(page, "Source");
+    await selectFilePanel(page, "Source");
 
     const editorHost = page.getByTestId("file-source-editor");
     const content = editor(page);
@@ -548,7 +550,7 @@ test.describe("CodeMirror workspace file editing", () => {
     );
     await workspace.navigateTo();
     await openWorkspaceFile(page, "notes.md");
-    await selectFileView(page, "Source");
+    await selectFilePanel(page, "Source");
 
     const markdownScroller = page
       .getByTestId("file-source-editor")
@@ -680,7 +682,7 @@ test.describe("CodeMirror workspace file editing", () => {
     await expect(page.getByTestId("workspace-tab-modified-file_draft.ts")).toBeVisible();
   });
 
-  test("refreshes Markdown and images while preserving Preview and Source behavior", async ({
+  test("refreshes Markdown and images while switching between Markdown and Source", async ({
     page,
     withWorkspace,
   }) => {
@@ -695,15 +697,15 @@ test.describe("CodeMirror workspace file editing", () => {
 
     const visibleFilePane = page.getByTestId("workspace-file-pane").filter({ visible: true });
     await expect(visibleFilePane.getByText("First heading", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Preview", exact: true })).toBeVisible();
+    await expect(filePanelSwitcher(page).getByRole("button", { name: "Markdown" })).toBeVisible();
     await writeFile(markdownPath, "# Updated heading\n", "utf8");
     await expect(visibleFilePane.getByText("Updated heading", { exact: true })).toBeVisible();
 
-    await selectFileView(page, "Source");
+    await selectFilePanel(page, "Source");
     await expect(page.getByTestId("file-source-editor")).toBeVisible();
     await replaceEditorText(page, "# Saved from source\n");
     await expect.poll(() => readFile(markdownPath, "utf8")).toBe("# Saved from source\n");
-    await selectFileView(page, "Preview");
+    await selectFilePanel(page, "Markdown");
     await expect(visibleFilePane.getByText("Saved from source", { exact: true })).toBeVisible();
 
     await openWorkspaceFile(page, "pixel.png");
@@ -786,10 +788,10 @@ test.describe("CodeMirror workspace file editing", () => {
     );
     await expect(preview.document.getByRole("heading", { name: "Updated plan" })).toBeVisible();
 
-    await selectFileView(page, "Source");
+    await selectFilePanel(page, "Source");
     await expect(page.getByTestId("file-source-editor")).toBeVisible();
     await expect(preview.host).toHaveCount(0);
-    await selectFileView(page, "Preview");
+    await selectFilePanel(page, "HTML");
     await expect(preview.host).toBeVisible();
   });
 

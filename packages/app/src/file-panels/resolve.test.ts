@@ -1,13 +1,23 @@
+import { createFilePanePreview } from "@/file-pane/preview-lifecycle/model";
+import { filePanelCatalog } from "./catalog";
+import type { FileReadResult } from "@getpaseo/client/internal/daemon-client";
+import type { AttachmentMetadata } from "@/attachments/types";
+import { resolveFileReadPanels } from "./resolve";
 import { describe, expect, it } from "vitest";
 import { resolveFilePanel, type FilePanelCandidate, type FilePanelFile } from "./resolve";
 
 const markdown: FilePanelCandidate = {
   id: "builtin:markdown",
+  builtin: true,
   files: { extensions: ["md", "markdown"] },
   document: "text",
   maxBytes: Infinity,
 };
-const alternative: FilePanelCandidate = { ...markdown, id: "plugin:notes/markdown" };
+const alternative: FilePanelCandidate = {
+  ...markdown,
+  id: "plugin:notes/markdown",
+  builtin: false,
+};
 const file: FilePanelFile = { path: "/docs/README.MD", kind: "text", size: 100, hasBytes: true };
 
 function resolve(
@@ -27,6 +37,7 @@ describe("resolveFilePanel", () => {
       panel: alternative,
       candidates: [markdown, alternative],
       selectorKey: "ext:md",
+      associatedPanelId: alternative.id,
     });
   });
   it("ignores an absent association without deleting it", () => {
@@ -39,12 +50,31 @@ describe("resolveFilePanel", () => {
     expect(resolve().panel).toBe(markdown);
     expect(resolve({ candidates: [alternative, markdown] }).panel).toBe(alternative);
   });
+  it("uses a tab choice before the association and ignores a choice that is not a candidate", () => {
+    const associations = { "ext:md": alternative.id };
+    expect(resolve({ associations, choice: markdown.id })).toMatchObject({
+      panel: markdown,
+      associatedPanelId: alternative.id,
+    });
+    expect(resolve({ associations, choice: "plugin:absent/markdown" }).panel).toBe(alternative);
+  });
   it("returns the floor when no selector matches", () => {
     expect(resolve({ file: { ...file, path: "index.ts" } })).toEqual({
       panel: null,
       candidates: [],
       selectorKey: "ext:ts",
+      associatedPanelId: null,
     });
+  });
+  it("offers a panel claiming every file wherever its document is available", () => {
+    const every: FilePanelCandidate = { ...markdown, id: "builtin:source", files: "all" };
+    expect(resolve({ file: { ...file, path: "index.ts" }, candidates: [every] })).toEqual({
+      panel: every,
+      candidates: [every],
+      selectorKey: "ext:ts",
+      associatedPanelId: null,
+    });
+    expect(resolve({ file: { ...file, kind: "binary" }, candidates: [every] }).panel).toBeNull();
   });
   it("filters text panels for binary files even with an association", () => {
     expect(
@@ -75,6 +105,7 @@ describe("resolveFilePanel", () => {
       panel: named,
       candidates: [markdown, named],
       selectorKey: "name:README.MD",
+      associatedPanelId: named.id,
     });
     expect(resolve({ file: { ...file, path: "README.md" }, candidates: [named] }).panel).toBeNull();
   });
@@ -94,6 +125,7 @@ describe("resolveFilePanel", () => {
         panel: named,
         candidates: [named],
         selectorKey: "name:Dockerfile",
+        associatedPanelId: null,
       });
     },
   );
@@ -101,5 +133,98 @@ describe("resolveFilePanel", () => {
     const upper = { ...alternative, files: { extensions: ["MD"] } };
     expect(resolve({ candidates: [upper] }).panel).toBe(upper);
     expect(resolve({ file: { ...file, path: "README" } }).selectorKey).toBe("ext:");
+  });
+});
+
+it("opens a binary PDF with its plugin and filters oversized and unavailable documents", () => {
+  const pdf: FilePanelCandidate = {
+    id: "plugin:pdf/viewer",
+    builtin: false,
+    files: { extensions: ["pdf"] },
+    document: "bytes",
+    maxBytes: 1024,
+  };
+  const pdfFile: FilePanelFile = {
+    path: "/workspace/document.pdf",
+    kind: "binary",
+    size: 1024,
+    hasBytes: true,
+  };
+  expect(
+    resolveFilePanel({ file: pdfFile, candidates: [markdown, pdf], associations: {} }).panel,
+  ).toBe(pdf);
+  expect(
+    resolveFilePanel({
+      file: { ...pdfFile, size: 1025 },
+      candidates: [pdf],
+      associations: { "ext:pdf": pdf.id },
+    }).panel,
+  ).toBeNull();
+});
+
+describe("resolved panel resources", () => {
+  const attachment: AttachmentMetadata = {
+    id: "preview",
+    mimeType: "image/png",
+    storageType: "web-indexeddb",
+    storageKey: "preview",
+    createdAt: 0,
+  };
+  function read(path: string, kind: FileReadResult["kind"]): FileReadResult {
+    return {
+      path,
+      kind,
+      bytes: new TextEncoder().encode("contents"),
+      mime: "text/plain",
+      size: 8,
+      modifiedAt: "2026-10-19T00:00:00Z",
+    };
+  }
+  it.each([
+    ["notes.md", "text"],
+    ["source.ts", "text"],
+    ["unknown.bin", "binary"],
+  ] as const)(
+    "does not create an attachment for %s, including live refreshes",
+    async (path, kind) => {
+      const writes: Uint8Array[] = [];
+      const persist = async (input: { bytes: Uint8Array }) => {
+        writes.push(input.bytes);
+        return attachment;
+      };
+      for (const modifiedAt of ["2026-10-19T00:00:00Z", "2026-10-19T00:00:01Z"]) {
+        const raw = { ...read(path, kind), modifiedAt };
+        const panel =
+          resolveFileReadPanels({
+            file: raw,
+            path,
+            candidates: filePanelCatalog([]),
+            associations: {},
+          })?.panel ?? null;
+        const preview = await createFilePanePreview(raw, panel, persist);
+        expect(preview?.bytesPreview).toBeNull();
+        expect(preview?.file).not.toHaveProperty("bytes");
+      }
+      expect(writes).toEqual([]);
+    },
+  );
+  it("persists and retains bytes only for the selected image panel", async () => {
+    const raw = read("picture.png", "image");
+    const panel =
+      resolveFileReadPanels({
+        file: raw,
+        path: raw.path,
+        candidates: filePanelCatalog([]),
+        associations: {},
+      })?.panel ?? null;
+    const writes: Uint8Array[] = [];
+    const preview = await createFilePanePreview(raw, panel, async (input) => {
+      writes.push(input.bytes);
+      return attachment;
+    });
+    expect(panel?.id).toBe("builtin:image");
+    expect(writes).toEqual([raw.bytes]);
+    expect(preview?.bytesPreview).toEqual({ bytes: raw.bytes, attachment });
+    expect(preview?.file).not.toHaveProperty("bytes");
   });
 });

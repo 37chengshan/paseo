@@ -7,18 +7,18 @@ import { ZoomableImage } from "@/components/zoomable-viewport/image";
 import type { Theme } from "@/styles/theme";
 import { FileHtmlPreview } from "./html-preview";
 import { FileMarkdownPreview } from "./markdown-preview";
-import type { builtinFilePanels } from "./catalog";
+import type { RenderingFilePanel } from "./catalog";
 
-interface FilePanelPreviewProps {
+interface BuiltinFilePanelProps {
   content: string;
   filePath: string;
   workspaceRoot: string;
   client: DaemonClient | null;
   serverId: string;
-  imagePreviewUri: string | null;
+  documentPreviewUri: string | null;
 }
 
-function MarkdownPanel(props: FilePanelPreviewProps) {
+function MarkdownPanel(props: BuiltinFilePanelProps) {
   return (
     <View style={styles.previewScrollContainer}>
       <ScrollView style={styles.previewContent} showsVerticalScrollIndicator>
@@ -34,7 +34,7 @@ function MarkdownPanel(props: FilePanelPreviewProps) {
   );
 }
 
-function HtmlPanel({ content }: FilePanelPreviewProps) {
+function HtmlPanel({ content }: BuiltinFilePanelProps) {
   return (
     <View style={styles.previewScrollContainer}>
       <FileHtmlPreview html={content} testID="file-html-preview" />
@@ -45,9 +45,9 @@ function HtmlPanel({ content }: FilePanelPreviewProps) {
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
 const foregroundMutedColorMapping = (theme: Theme) => ({ color: theme.colors.foregroundMuted });
 
-function ImagePanel({ imagePreviewUri }: FilePanelPreviewProps) {
+function ImagePanel({ documentPreviewUri }: BuiltinFilePanelProps) {
   const { t } = useTranslation();
-  if (!imagePreviewUri) {
+  if (!documentPreviewUri) {
     return (
       <View style={styles.centerState}>
         <ThemedLoadingSpinner size="small" uniProps={foregroundMutedColorMapping} />
@@ -55,7 +55,7 @@ function ImagePanel({ imagePreviewUri }: FilePanelPreviewProps) {
       </View>
     );
   }
-  return <ZoomableImage uri={imagePreviewUri} testID="image-file-preview" />;
+  return <ZoomableImage uri={documentPreviewUri} testID="image-file-preview" />;
 }
 
 const components = {
@@ -64,11 +64,11 @@ const components = {
   "builtin:image": ImagePanel,
 };
 
-export function FilePanelPreview({
+export function BuiltinFilePanelView({
   panel,
   ...props
-}: FilePanelPreviewProps & {
-  panel: (typeof builtinFilePanels)[number];
+}: BuiltinFilePanelProps & {
+  panel: RenderingFilePanel;
 }) {
   const Component = components[panel.id];
   return <Component {...props} />;

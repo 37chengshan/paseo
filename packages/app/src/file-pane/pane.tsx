@@ -1,13 +1,19 @@
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+import type { DaemonClient, FileReadResult } from "@getpaseo/client/internal/daemon-client";
 import { Text, View } from "react-native";
 import { StyleSheet, UnistylesRuntime, withUnistyles } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
-import { useIsCompactFormFactor } from "@/constants/layout";
 import { useSessionStore, type ExplorerFile } from "@/stores/session-store";
-import { FilePanelPreview, resolveFilePreviewPanel, type FilePanel } from "@/file-panels";
+import {
+  FilePanelPicker,
+  FilePanelView,
+  isSourceFilePanel,
+  useFilePanelChoice,
+  type FilePanel,
+  type FilePanelChoice,
+} from "@/file-panels";
 import { useAttachmentPreviewUrl } from "@/attachments/use-attachment-preview-url";
 import { getFileNameFromPath } from "@/attachments/utils";
 import { resolveFilePreviewReadTarget } from "@/file-explorer/preview-target";
@@ -20,13 +26,13 @@ import { useAppSettings } from "@/hooks/use-settings";
 import { useLiveFile } from "./live-file/hook";
 import { useFilePreview } from "./preview-lifecycle/hook";
 import { resolveFilePreviewLifecycle } from "./preview-lifecycle/model";
-import { FilePanelBar } from "./bar";
+import { FilePanelBar, FileSourceStatus } from "./bar";
 import { FileEditorModel, getFileConflictCallout, type FileConflictCallout } from "./editor/model";
 import { createFileObservationSource } from "./editor/observation-source";
 import { FileEditorView } from "./editor/view";
 import { FileSourceView } from "./source/view";
 import type { FileConflictAlertState } from "./conflict-alert";
-import type { LiveFileModel } from "./live-file/model";
+import type { LiveFileModel, LiveFileSnapshot } from "./live-file/model";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { usePublishPanelInstanceAttributes } from "@/panels/panel-instance-attributes";
 import type { Theme } from "@/styles/theme";
@@ -36,15 +42,15 @@ const foregroundMutedColorMapping = (theme: Theme) => ({
   color: theme.colors.foregroundMuted,
 });
 
-interface FilePreviewBodyProps {
+interface FilePanelBodyProps {
+  bytes: Uint8Array | null;
+  setText?: (text: string) => void;
   panel: FilePanel | null;
   preview: ExplorerFile | null;
-  mode?: "preview" | "source";
   isLoading: boolean;
-  isMobile: boolean;
   location: WorkspaceFileLocation;
   navigationRevision: number;
-  imagePreviewUri: string | null;
+  documentPreviewUri: string | null;
   workspaceRoot: string;
   client: DaemonClient | null;
   serverId: string;
@@ -121,19 +127,20 @@ function TooLargeSource({ size }: { size?: number }) {
   );
 }
 
-function FilePreviewBody({
+/** The tab body: the file's panel, Source read-only when the tab cannot edit. */
+function FilePanelBody({
+  bytes,
+  setText,
   panel,
   preview,
-  mode,
   isLoading,
-  isMobile: _isMobile,
   location,
   navigationRevision,
-  imagePreviewUri,
+  documentPreviewUri,
   workspaceRoot,
   client,
   serverId,
-}: FilePreviewBodyProps) {
+}: FilePanelBodyProps) {
   const { t } = useTranslation();
   const filePath = location.path;
 
@@ -154,21 +161,15 @@ function FilePreviewBody({
     );
   }
 
-  const showSource = preview.kind === "text" && (Boolean(location.lineStart) || mode === "source");
-  if (panel && !showSource) {
+  if (!panel) {
     return (
-      <FilePanelPreview
-        panel={panel}
-        content={preview.content ?? ""}
-        filePath={filePath}
-        workspaceRoot={workspaceRoot}
-        client={client}
-        serverId={serverId}
-        imagePreviewUri={imagePreviewUri}
-      />
+      <View style={styles.centerState}>
+        <Text style={styles.emptyText}>{t("panels.file.binaryPreviewUnavailable")}</Text>
+        <Text style={styles.binaryMetaText}>{formatFileSize({ size: preview.size })}</Text>
+      </View>
     );
   }
-  if (preview.kind === "text") {
+  if (isSourceFilePanel(panel)) {
     return (
       <ReadonlySource
         preview={preview}
@@ -178,12 +179,21 @@ function FilePreviewBody({
       />
     );
   }
-
   return (
-    <View style={styles.centerState}>
-      <Text style={styles.emptyText}>{t("panels.file.binaryPreviewUnavailable")}</Text>
-      <Text style={styles.binaryMetaText}>{formatFileSize({ size: preview.size })}</Text>
-    </View>
+    <FilePanelView
+      bytes={bytes}
+      panel={panel}
+      preview={preview}
+      location={location}
+      navigationRevision={navigationRevision}
+      setText={setText}
+      content={preview.content ?? ""}
+      filePath={filePath}
+      workspaceRoot={workspaceRoot}
+      client={client}
+      serverId={serverId}
+      documentPreviewUri={documentPreviewUri}
+    />
   );
 }
 
@@ -199,9 +209,6 @@ export function FilePane({
   navigationRevision: number;
 }) {
   const { t } = useTranslation();
-  const { settings } = useAppSettings();
-  const isMobile = useIsCompactFormFactor();
-  const [previewMode, setPreviewMode] = useState<"preview" | "source">("preview");
 
   const client = useSessionStore((state) => state.sessions[serverId]?.client ?? null);
   // COMPAT(workspaceFileEditing): added in v0.2.0, remove after 2027-01-18 once daemon floor >= v0.2.0.
@@ -240,26 +247,31 @@ export function FilePane({
   });
 
   const targetKey = readTarget ? `${readTarget.cwd}:${readTarget.path}` : null;
+  const { panel: resolvedPanel, choice } = useFilePanelChoice({
+    serverId,
+    targetKey,
+    path: location.path,
+    file: readyFile(liveFile.snapshot, targetKey),
+    presentable: isActive,
+    lineNavigation: location.lineStart ? navigationRevision : null,
+  });
   const previewLifecycle = useFilePreview({
+    panel: resolvedPanel,
     targetKey,
     liveFileSnapshot: liveFile.snapshot,
   });
 
-  useEffect(() => setPreviewMode("preview"), [targetKey]);
-
-  const { file: preview, imageAttachment } = resolveFilePreviewLifecycle(previewLifecycle);
-  const imagePreviewUri = useAttachmentPreviewUrl(imageAttachment);
-  const panel = resolveFilePreviewPanel({
-    preview,
-    path: location.path,
-    associations: settings.filePanelAssociations,
-  });
-  const isRenderable = preview?.kind === "text" && panel !== null;
+  const {
+    file: preview,
+    panel,
+    bytes,
+    documentAttachment,
+  } = resolveFilePreviewLifecycle(previewLifecycle);
+  const documentPreviewUri = useAttachmentPreviewUrl(documentAttachment);
   const editable = isEditableTextFile({
     preview,
     supportsEditing,
   });
-  const canTogglePreviewMode = isRenderable && !location.lineStart;
   const lineCount =
     preview?.kind === "text" ? (preview.content ?? "").split("\n").length : undefined;
   const errorMessage = previewLifecycle.status === "error" ? previewLifecycle.message : null;
@@ -269,31 +281,41 @@ export function FilePane({
     previewLifecycle.status === "preparing";
 
   return (
-    <FilePanePresentation
-      panel={panel}
-      serverId={serverId}
-      workspaceRoot={normalizedWorkspaceRoot}
-      client={client}
-      readTarget={readTarget}
-      preview={preview}
-      liveFile={liveFile.model}
-      onRetryRead={liveFile.refresh}
-      retryingRead={liveFile.isRetrying}
-      retryLabel={t("common.actions.retry")}
-      filename={getFileNameFromPath(location.path) ?? location.path}
-      previewMode={canTogglePreviewMode ? previewMode : undefined}
-      onPreviewModeChange={canTogglePreviewMode ? setPreviewMode : undefined}
-      lineCount={lineCount}
-      editable={editable}
-      disconnectedMessage={t("workspace.terminal.hostDisconnected")}
-      errorMessage={errorMessage}
-      isLoading={isLoading}
-      isMobile={isMobile}
-      location={location}
-      navigationRevision={navigationRevision}
-      imagePreviewUri={imagePreviewUri}
-    />
+    <>
+      <FilePanelPicker choice={choice} />
+      <FilePanePresentation
+        bytes={bytes}
+        panel={panel}
+        choice={choice}
+        serverId={serverId}
+        workspaceRoot={normalizedWorkspaceRoot}
+        client={client}
+        readTarget={readTarget}
+        preview={preview}
+        liveFile={liveFile.model}
+        onRetryRead={liveFile.refresh}
+        retryingRead={liveFile.isRetrying}
+        retryLabel={t("common.actions.retry")}
+        filename={getFileNameFromPath(location.path) ?? location.path}
+        lineCount={lineCount}
+        editable={editable}
+        disconnectedMessage={t("workspace.terminal.hostDisconnected")}
+        errorMessage={errorMessage}
+        isLoading={isLoading}
+        location={location}
+        navigationRevision={navigationRevision}
+        documentPreviewUri={documentPreviewUri}
+      />
+    </>
   );
+}
+
+/** The read for `targetKey`; right after a retarget the snapshot still holds the previous file. */
+function readyFile(snapshot: LiveFileSnapshot, targetKey: string | null): FileReadResult | null {
+  const observation = snapshot.observation;
+  if (observation?.status !== "ready") return null;
+  const { cwd, path } = observation.version;
+  return targetKey === `${cwd}:${path}` ? observation.file : null;
 }
 
 function isEditableTextFile(input: {
@@ -309,7 +331,9 @@ function isEditableTextFile(input: {
 }
 
 function FilePanePresentation({
+  bytes,
   panel,
+  choice,
   serverId,
   workspaceRoot,
   client,
@@ -320,19 +344,18 @@ function FilePanePresentation({
   retryingRead,
   retryLabel,
   filename,
-  previewMode,
-  onPreviewModeChange,
   lineCount,
   editable,
   disconnectedMessage,
   errorMessage,
   isLoading,
-  isMobile,
   location,
   navigationRevision,
-  imagePreviewUri,
+  documentPreviewUri,
 }: {
+  bytes: Uint8Array | null;
   panel: FilePanel | null;
+  choice: FilePanelChoice;
   serverId: string;
   workspaceRoot: string;
   client: DaemonClient | null;
@@ -343,17 +366,14 @@ function FilePanePresentation({
   retryingRead: boolean;
   retryLabel: string;
   filename: string;
-  previewMode?: "preview" | "source";
-  onPreviewModeChange?: (mode: "preview" | "source") => void;
   lineCount?: number;
   editable: boolean;
   disconnectedMessage: string;
   errorMessage: string | null;
   isLoading: boolean;
-  isMobile: boolean;
   location: WorkspaceFileLocation;
   navigationRevision: number;
-  imagePreviewUri: string | null;
+  documentPreviewUri: string | null;
 }) {
   if (!client && readTarget) {
     return (
@@ -368,7 +388,10 @@ function FilePanePresentation({
   if (editable && client && readTarget && preview?.kind === "text") {
     return (
       <EditableFilePane
+        bytes={bytes}
         panel={panel}
+        choice={choice}
+        documentPreviewUri={documentPreviewUri}
         key={`${serverId}:${readTarget.cwd}:${readTarget.path}`}
         serverId={serverId}
         workspaceRoot={workspaceRoot}
@@ -380,10 +403,7 @@ function FilePanePresentation({
         onRetryRead={onRetryRead}
         retryingRead={retryingRead}
         filename={filename}
-        mode={previewMode}
-        onModeChange={onPreviewModeChange}
         isLoading={isLoading}
-        isMobile={isMobile}
         location={location}
         navigationRevision={navigationRevision}
       />
@@ -412,23 +432,15 @@ function FilePanePresentation({
 
   return (
     <View style={styles.container} testID="workspace-file-pane">
-      {preview ? (
-        <FilePanelBar
-          size={preview.size}
-          lineCount={lineCount}
-          mode={previewMode}
-          onModeChange={onPreviewModeChange}
-        />
-      ) : null}
-      <FilePreviewBody
+      {preview ? <FilePanelBar size={preview.size} lineCount={lineCount} choice={choice} /> : null}
+      <FilePanelBody
+        bytes={bytes}
         panel={panel}
         preview={preview}
-        mode={previewMode}
         isLoading={isLoading}
-        isMobile={isMobile}
         location={location}
         navigationRevision={navigationRevision}
-        imagePreviewUri={imagePreviewUri}
+        documentPreviewUri={documentPreviewUri}
         workspaceRoot={workspaceRoot}
         client={client}
         serverId={serverId}
@@ -438,7 +450,10 @@ function FilePanePresentation({
 }
 
 function EditableFilePane({
+  bytes,
+  documentPreviewUri,
   panel,
+  choice,
   serverId,
   workspaceRoot,
   client,
@@ -449,14 +464,14 @@ function EditableFilePane({
   onRetryRead,
   retryingRead,
   filename,
-  mode,
-  onModeChange,
   isLoading,
-  isMobile,
   location,
   navigationRevision,
 }: {
+  bytes: Uint8Array | null;
+  documentPreviewUri: string | null;
   panel: FilePanel | null;
+  choice: FilePanelChoice;
   serverId: string;
   workspaceRoot: string;
   client: DaemonClient;
@@ -467,10 +482,7 @@ function EditableFilePane({
   onRetryRead: () => void;
   retryingRead: boolean;
   filename: string;
-  mode?: "preview" | "source";
-  onModeChange?: (mode: "preview" | "source") => void;
   isLoading: boolean;
-  isMobile: boolean;
   location: WorkspaceFileLocation;
   navigationRevision: number;
 }) {
@@ -564,6 +576,7 @@ function EditableFilePane({
     onRetry: onRetryRead,
     retrying: retryingRead,
   });
+  const setText = useCallback((text: string) => model.edit(text), [model]);
   const handleVimModeChange = useCallback((nextMode: string | null) => setVimMode(nextMode), []);
   const renderedPreview = useMemo<ExplorerFile>(
     () => ({
@@ -575,7 +588,11 @@ function EditableFilePane({
     }),
     [preview, snapshot.content, snapshot.version],
   );
-  const showSource = mode !== "preview";
+  const sourceActive = panel !== null && isSourceFilePanel(panel);
+  const sourceStatus = useMemo(
+    () => (sourceActive ? <FileSourceStatus cursor={cursor} vimMode={vimMode} /> : null),
+    [cursor, sourceActive, vimMode],
+  );
 
   return (
     <View style={styles.container} testID="workspace-file-pane">
@@ -585,13 +602,11 @@ function EditableFilePane({
         }
         lineCount={snapshot.content.split("\n").length}
         editorStatus={snapshot.status}
-        cursor={showSource ? cursor : undefined}
-        vimMode={showSource ? vimMode : null}
         conflict={conflict}
-        mode={mode}
-        onModeChange={onModeChange}
+        choice={choice}
+        trailing={sourceStatus}
       />
-      {showSource ? (
+      {sourceActive ? (
         <FileEditorView
           model={model}
           filename={filename}
@@ -603,15 +618,15 @@ function EditableFilePane({
           onVimModeChange={handleVimModeChange}
         />
       ) : (
-        <FilePreviewBody
+        <FilePanelBody
+          bytes={bytes}
           panel={panel}
+          setText={setText}
           preview={renderedPreview}
-          mode={mode}
           isLoading={isLoading}
-          isMobile={isMobile}
           location={location}
           navigationRevision={navigationRevision}
-          imagePreviewUri={null}
+          documentPreviewUri={documentPreviewUri}
           workspaceRoot={workspaceRoot}
           client={client}
           serverId={serverId}
