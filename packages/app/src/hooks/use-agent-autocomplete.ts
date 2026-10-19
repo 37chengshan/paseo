@@ -362,6 +362,14 @@ function resolveAutocompleteEmptyText(args: {
   return args.t("agentAutocomplete.noCommands");
 }
 
+function shouldWaitForProviderCommands(args: {
+  mode: AutocompleteMode;
+  isCommandsLoading: boolean;
+  isConnected: boolean;
+}): boolean {
+  return args.mode === "command" && args.isCommandsLoading && args.isConnected;
+}
+
 export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAutocompleteResult {
   const { t } = useTranslation();
   const {
@@ -441,7 +449,8 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
   const { commands, isError, error } = commandsQuery;
   const isCommandsLoading = canListCommands && commandsQuery.isLoading;
 
-  const isVisible = canShowAutocomplete && !(mode === "command" && isCommandsLoading);
+  const isVisible =
+    canShowAutocomplete && !shouldWaitForProviderCommands({ mode, isCommandsLoading, isConnected });
 
   const fileSuggestionsQuery = useQuery({
     queryKey: [
