@@ -68,6 +68,11 @@ describe("plugin manifest", () => {
     { id: "INVALID" },
     { description: 42 },
     { requirements: { paseoo: ">=0.11.0" } },
+    { translations: { "zh-cn": { name: "示例" } } },
+    { translations: { en: { name: "Example" } } },
+    { translations: { "not a tag": { name: "Example" } } },
+    { translations: { "zh-CN": { name: "  " } } },
+    { translations: { "zh-CN": { desc: "示例" } } },
   ])("rejects invalid known fields: %j", async (fields) => {
     const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-manifest-"));
     directories.push(directory);
@@ -126,6 +131,19 @@ describe("plugin manifest", () => {
       JSON.stringify({ id: "described", description: "   " }),
     );
     await expect(readPluginManifest(directory)).rejects.toThrow();
+  });
+
+  it("reads listing translations with each field optional", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "paseo-plugin-manifest-"));
+    directories.push(directory);
+    const manifest = {
+      id: "described",
+      name: "Reviewer",
+      description: "Reviews changes before merge",
+      translations: { "zh-CN": { description: "合并前审查改动" } },
+    };
+    await writeFile(path.join(directory, "paseo-plugin.json"), JSON.stringify(manifest));
+    await expect(readPluginManifest(directory)).resolves.toEqual(manifest);
   });
 
   it("accepts only non-empty argv arrays for build commands", async () => {

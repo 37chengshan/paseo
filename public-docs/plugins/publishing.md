@@ -49,6 +49,30 @@ overview, including development or setup examples. Link to your README for those
 Also supply a one-sentence description: use `package.json`'s `description` for npm or the manifest's
 `description` for Git. The reviewer can fill in a missing description in the registry.
 
+### Other languages
+
+The website shows listings in English and Simplified Chinese. English is required; translations are
+optional. Add translated listing text to `paseo-plugin.json`, keyed by language tag:
+
+```json
+{
+  "id": "review-tools",
+  "name": "Review tools",
+  "description": "Reviews changes before merge",
+  "translations": {
+    "zh-CN": { "name": "审查工具", "description": "在合并前审查改动" }
+  }
+}
+```
+
+Each field is optional. A missing translated `name` or `description` shows the English one.
+
+To translate the overview, put a whole copy beside `OVERVIEW.md` named for the language, such as
+`OVERVIEW.zh-CN.md`, and include it in the published package. The scaffold's `files` list already
+includes `OVERVIEW.*.md`. Readers in that language see the translated overview; without one, they
+see the English overview with a notice. Keep the translation in step with `OVERVIEW.md`; the overview rules
+above apply to it too.
+
 ## Icons and screenshots
 
 Themes, panels and other visual plugin interfaces need at least one image showing the current
