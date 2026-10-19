@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { View } from "react-native";
 import { Settings } from "lucide-react-native";
 import { withUnistyles } from "react-native-unistyles";
@@ -13,15 +14,15 @@ import { useUsagePreferences } from "./display";
 import { useUsageInSidebar } from "./in-sidebar";
 import type { UsageDisplayAs } from "./preferences";
 
-const DISPLAY_AS_OPTIONS: SegmentedControlOption<UsageDisplayAs>[] = [
-  { value: "used", label: usageCopy.displayUsed, testID: "usage-display-used" },
-  { value: "remaining", label: usageCopy.displayRemaining, testID: "usage-display-remaining" },
-];
-
 const ThemedSettings = withUnistyles(Settings);
 
 /** The shared usage preferences, opened from a cog as a popover or compact sheet. */
 export function UsageOptions() {
+  useTranslation();
+  const displayAsOptions: SegmentedControlOption<UsageDisplayAs>[] = [
+    { value: "used", label: usageCopy.displayUsed, testID: "usage-display-used" },
+    { value: "remaining", label: usageCopy.displayRemaining, testID: "usage-display-remaining" },
+  ];
   const compact = useIsCompactFormFactor();
   const { display } = useUsagePreferences();
   const { inSidebar, setInSidebar } = useUsageInSidebar();
@@ -55,7 +56,7 @@ export function UsageOptions() {
           <View style={settingsStyles.rowBorder}>
             <SettingsRow label={usageCopy.displayAs}>
               <SegmentedControl
-                options={DISPLAY_AS_OPTIONS}
+                options={displayAsOptions}
                 value={display.displayAs}
                 onValueChange={display.setDisplayAs}
                 size="sm"

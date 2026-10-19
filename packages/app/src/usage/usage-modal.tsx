@@ -22,6 +22,7 @@ interface UsageModalProps {
  * title row.
  */
 export function UsageModal(props: UsageModalProps) {
+  useTranslation();
   const { serverId, connectedHosts, select } = useUsageHostSelection();
   if (!serverId) {
     return (

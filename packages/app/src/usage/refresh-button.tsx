@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { RotateCw } from "lucide-react-native";
 import { withUnistyles } from "react-native-unistyles";
 import { extraMutedIconColorMapping } from "@/components/ui/icon-button-chrome";
@@ -14,6 +15,7 @@ const ThemedLoadingSpinner = withUnistyles(LoadingSpinner);
  * header's island, so its highlight is round.
  */
 export function UsageRefreshButton({ busy, onRefresh }: { busy: boolean; onRefresh: () => void }) {
+  useTranslation();
   const compact = useIsCompactFormFactor();
   const iconSize = paneContentToolbarIconSize(compact);
   return (

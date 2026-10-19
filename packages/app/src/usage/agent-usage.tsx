@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { UsageCard } from "./card";
@@ -21,6 +22,7 @@ export function AgentUsage({
   /** Whether each card has a Refresh button; a surface that cannot be pressed hides it. */
   refreshable: boolean;
 }) {
+  useTranslation();
   const view = useAgentUsage(serverId, agentId);
   if (view.kind === "none") return null;
   return (

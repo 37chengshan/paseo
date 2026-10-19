@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { i18n } from "@/i18n/i18next";
 import {
   resolveUsageReport,
   displayPercent,
-  formatUsageFreshness,
   resolveAgentUsageView,
   replaceReport,
   resolveUsageRefresh,
@@ -65,6 +65,18 @@ describe("resolveUsageView", () => {
     ).toEqual({ kind: "unavailable", message: "Connect to Laptop to see usage" });
   });
 
+  it("localizes unavailable host messages while retaining the host name", async () => {
+    await i18n.changeLanguage("ko");
+    expect(
+      resolveUsageView({
+        hostLabel: "Laptop",
+        isConnected: false,
+        supportsUsage: false,
+        query: undefined,
+      }),
+    ).toEqual({ kind: "unavailable", message: "Laptop에 연결하여 제공업체 사용량을 확인하세요" });
+  });
+
   it("moves from loading to ready to error", () => {
     const base = { hostLabel: "Laptop", isConnected: true, supportsUsage: true };
     expect(resolveUsageView({ ...base, query: undefined })).toEqual({ kind: "loading" });
@@ -78,6 +90,10 @@ describe("resolveUsageView", () => {
       }),
     ).toEqual({ kind: "error", message: "boom" });
   });
+});
+
+afterEach(async () => {
+  await i18n.changeLanguage("en");
 });
 
 const hosts: UsageHost[] = [
@@ -182,14 +198,6 @@ describe("displayPercent", () => {
 
   it("has no percent when the window reports none", () => {
     expect(displayPercent(window({}), "remaining")).toBeNull();
-  });
-});
-
-describe("formatUsageFreshness", () => {
-  it("says when the report was fetched", () => {
-    expect(formatUsageFreshness("now")).toBe("Updated just now");
-    expect(formatUsageFreshness("3m")).toBe("Updated 3m ago");
-    expect(formatUsageFreshness("Jan 15")).toBe("Updated Jan 15");
   });
 });
 
