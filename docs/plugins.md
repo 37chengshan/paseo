@@ -556,6 +556,17 @@ one section's order from built-ins, plugin groups, and the section's preference
   remembers under its own key. It shares header ids and the `plugin:<pluginId>:<id>` settings key
   with new-API items.
 
+## Contribute file panels
+
+Client `addFilePanel` registrations become the body of a file tab, rendering host-owned text or
+bytes. The tab's bar owns the document's status (size, lines, save state, conflicts) and switches
+between the file's panels; Source, Paseo's editor, is a built-in panel for every text file and
+always the last choice. Keep editing in the host document so autosave and conflicts have one
+owner. See the
+[public file panel reference](../public-docs/plugins/reference.md#file-panels) for selectors,
+selection, document props, `DocumentFrame`, and the version requirement. The examples live in
+`plugin-examples/pdf-panel` and `plugin-examples/markdown-panel`.
+
 ## Contribute buttons
 
 Header buttons and composer pills share the client-only descriptor and registration lifecycle in
