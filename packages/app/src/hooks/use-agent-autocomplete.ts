@@ -362,12 +362,18 @@ function resolveAutocompleteEmptyText(args: {
   return args.t("agentAutocomplete.noCommands");
 }
 
-function shouldWaitForProviderCommands(args: {
+export function shouldHideCommandAutocomplete(args: {
   mode: AutocompleteMode;
   isCommandsLoading: boolean;
   isConnected: boolean;
+  isInlineSlashCommand: boolean;
 }): boolean {
-  return args.mode === "command" && args.isCommandsLoading && args.isConnected;
+  return (
+    args.mode === "command" &&
+    args.isCommandsLoading &&
+    args.isInlineSlashCommand &&
+    !args.isConnected
+  );
 }
 
 export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAutocompleteResult {
@@ -450,7 +456,13 @@ export function useAgentAutocomplete(input: UseAgentAutocompleteInput): AgentAut
   const isCommandsLoading = canListCommands && commandsQuery.isLoading;
 
   const isVisible =
-    canShowAutocomplete && !shouldWaitForProviderCommands({ mode, isCommandsLoading, isConnected });
+    canShowAutocomplete &&
+    !shouldHideCommandAutocomplete({
+      mode,
+      isCommandsLoading,
+      isConnected,
+      isInlineSlashCommand: activeSlashCommand?.position === "inline",
+    });
 
   const fileSuggestionsQuery = useQuery({
     queryKey: [
