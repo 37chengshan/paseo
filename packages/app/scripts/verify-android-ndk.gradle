@@ -1,0 +1,13 @@
+// After Expo prebuild, run from packages/app/android:
+// ./gradlew --init-script ../scripts/verify-android-ndk.gradle verifyUnistylesNdk
+gradle.projectsEvaluated {
+    rootProject.tasks.register('verifyUnistylesNdk') {
+        doLast {
+            def expected = rootProject.ext.ndkVersion
+            def actual = rootProject.project(':react-native-unistyles').android.ndkVersion
+            println "Project NDK: ${expected}"
+            println "Unistyles NDK: ${actual}"
+            assert actual == expected : "Unistyles must use project NDK ${expected}, got ${actual}"
+        }
+    }
+}
